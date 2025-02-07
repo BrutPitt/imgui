@@ -147,7 +147,9 @@ int main(int, char**)
         int width, height;
         glfwGetFramebufferSize((GLFWwindow*)window, &width, &height);
         if (width != wgpu_surface_width || height != wgpu_surface_height)  {
+            ImGui_ImplWGPU_InvalidateDeviceObjects();
             surfaceResize(width, height);
+            ImGui_ImplWGPU_CreateDeviceObjects();
             continue;
         }
 
@@ -339,9 +341,14 @@ static bool InitWGPU(GLFWwindow* window)
         UINT64_MAX);
 
     assert(localDevice != nullptr);
-
 #endif
 
+    surfaceConfiguration.presentMode = WGPUPresentMode_Fifo;
+    surfaceConfiguration.alphaMode   = WGPUCompositeAlphaMode_Auto;
+    surfaceConfiguration.usage       = WGPUTextureUsage_RenderAttachment;
+    surfaceConfiguration.width       = wgpu_surface_width;
+    surfaceConfiguration.height      = wgpu_surface_height;
+    
 #ifdef __EMSCRIPTEN__
     wgpu::SurfaceDescriptorFromCanvasHTMLSelector html_surface_desc = {};
     html_surface_desc.selector = "#canvas";
@@ -351,6 +358,9 @@ static bool InitWGPU(GLFWwindow* window)
 
     wgpu::Adapter adapter = {};
     wgpu_preferred_fmt = (WGPUTextureFormat)surface.GetPreferredFormat(adapter);
+
+    surfaceConfiguration.device      = wgpu_device;
+    surfaceConfiguration.format      = wgpu_preferred_fmt;
 #else
 
     wgpu::Surface surface = wgpu::glfw::CreateSurfaceForWindow(instance, window);
@@ -362,16 +372,12 @@ static bool InitWGPU(GLFWwindow* window)
     surface.GetCapabilities(localAdapter, &capabilities);
     wgpu_preferred_fmt = (WGPUTextureFormat) capabilities.formats[0];
 
-    surfaceConfiguration.presentMode = WGPUPresentMode_Fifo; // (WGPUPresentModes) capabilities.presentModes[0]
-    surfaceConfiguration.alphaMode   = WGPUCompositeAlphaMode_Auto;
-    surfaceConfiguration.usage       = WGPUTextureUsage_RenderAttachment;
-    surfaceConfiguration.device      = localDevice.Get();
+    wgpu_device   = localDevice.MoveToCHandle();
+
+    surfaceConfiguration.device      = wgpu_device;
     surfaceConfiguration.format      = wgpu_preferred_fmt;
-    surfaceConfiguration.width       = wgpu_surface_width;
-    surfaceConfiguration.height      = wgpu_surface_height;
     surface.Configure((const wgpu::SurfaceConfiguration *) &surfaceConfiguration);
 
-    wgpu_device   = localDevice.MoveToCHandle();
 #endif
     wgpu_instance = instance.MoveToCHandle();
     wgpu_surface  = surface.MoveToCHandle();
@@ -381,20 +387,8 @@ static bool InitWGPU(GLFWwindow* window)
 
 void surfaceResize(int width, int height)
 {
-    ImGui_ImplWGPU_InvalidateDeviceObjects();
-
-    surfaceConfiguration.width       = width;
-    surfaceConfiguration.height      = height;
-
-    surfaceConfiguration.presentMode = WGPUPresentMode_Fifo;
-    surfaceConfiguration.alphaMode   = WGPUCompositeAlphaMode_Auto;
-    surfaceConfiguration.usage       = WGPUTextureUsage_RenderAttachment;
-    surfaceConfiguration.device      = wgpu_device;
-    surfaceConfiguration.format      = wgpu_preferred_fmt;
-
-    wgpu_surface_width  = width;
-    wgpu_surface_height = height;
+    wgpu_surface_width  = surfaceConfiguration.width  = width;
+    wgpu_surface_height = surfaceConfiguration.height = height;
 
     wgpuSurfaceConfigure( wgpu_surface, (WGPUSurfaceConfiguration *) &surfaceConfiguration );
-    ImGui_ImplWGPU_CreateDeviceObjects();
 }
