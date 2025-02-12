@@ -31,18 +31,47 @@
 #endif
 
 // Global WebGPU required states
-static WGPUInstance      wgpu_instance = nullptr;
-static WGPUDevice        wgpu_device = nullptr;
-static WGPUSurface       wgpu_surface = nullptr;
-static WGPUTextureFormat wgpu_preferred_fmt = WGPUTextureFormat_Undefined;  // acquired from SurfaceCapabilities
-static int               wgpu_surface_width = 1280;
-static int               wgpu_surface_height = 720;
-
-static WGPUSurfaceConfiguration surfaceConfiguration {};
+static WGPUInstance             wgpu_instance = nullptr;
+static WGPUDevice               wgpu_device = nullptr;
+static WGPUSurface              wgpu_surface = nullptr;
+static WGPUTextureFormat        wgpu_preferred_fmt = WGPUTextureFormat_Undefined;  // acquired from SurfaceCapabilities
+static WGPUSurfaceConfiguration wgpu_surface_configuration {};
+static int                      wgpu_surface_width = 1280;
+static int                      wgpu_surface_height = 720;
 
 // Forward declarations
 static bool InitWGPU(GLFWwindow* window);
-static void surfaceResize(int width, int height);
+static void ResizeSurface(int width, int height);
+
+#ifndef __EMSCRIPTEN__
+void wgpu_device_lost_callback(const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView message)
+{
+    const char* reasonName = "";
+    switch (reason)
+    {
+        case wgpu::DeviceLostReason::Unknown:         reasonName = "Unknown";         break;
+        case wgpu::DeviceLostReason::Destroyed:       reasonName = "Destroyed";       break;
+        case wgpu::DeviceLostReason::InstanceDropped: reasonName = "InstanceDropped"; break;
+        case wgpu::DeviceLostReason::FailedCreation:  reasonName = "FailedCreation";  break;
+        default:                                      reasonName = "UNREACHABLE";     break;
+    }
+    printf("%s error: %s\n", reasonName, message.data);
+}
+
+void wgpu_error_callback(const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView message)
+{
+    const char* errorTypeName = "";
+    switch (type)
+    {
+        case wgpu::ErrorType::Validation:  errorTypeName = "Validation";      break;
+        case wgpu::ErrorType::OutOfMemory: errorTypeName = "Out of memory";   break;
+        case wgpu::ErrorType::Unknown:     errorTypeName = "Unknown";         break;
+        case wgpu::ErrorType::Internal:    errorTypeName = "Internal";        break;
+        default:                           errorTypeName = "UNREACHABLE";     break;
+    }
+    printf("%s error: %s\n", errorTypeName, message.data);
+}
+#endif
 
 static void glfw_error_callback(int error, const char* description)
 {
@@ -146,9 +175,10 @@ int main(int, char**)
         // React to changes in screen size
         int width, height;
         glfwGetFramebufferSize((GLFWwindow*)window, &width, &height);
-        if (width != wgpu_surface_width || height != wgpu_surface_height)  {
+        if (width != wgpu_surface_width || height != wgpu_surface_height)
+        {
             ImGui_ImplWGPU_InvalidateDeviceObjects();
-            surfaceResize(width, height);
+            ResizeSurface(width, height);
             ImGui_ImplWGPU_CreateDeviceObjects();
             continue;
         }
@@ -157,7 +187,6 @@ int main(int, char**)
         ImGui_ImplWGPU_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-
 
         // 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear ImGui!).
         if (show_demo_window)
@@ -264,92 +293,21 @@ int main(int, char**)
 
 static bool InitWGPU(GLFWwindow* window)
 {
+    static wgpu::Adapter localAdapter;
+    static wgpu::Device localDevice;
+
+    wgpu_surface_configuration.presentMode = WGPUPresentMode_Fifo;
+    wgpu_surface_configuration.alphaMode   = WGPUCompositeAlphaMode_Auto;
+    wgpu_surface_configuration.usage       = WGPUTextureUsage_RenderAttachment;
+    wgpu_surface_configuration.width       = wgpu_surface_width;
+    wgpu_surface_configuration.height      = wgpu_surface_height;
+
 #ifdef __EMSCRIPTEN__
     wgpu::Instance instance = wgpuCreateInstance(nullptr);
     wgpu_device = emscripten_webgpu_get_device();
     if (!wgpu_device)
         return false;
-#else
-    WGPUInstanceDescriptor instanceDescriptor {};
-    instanceDescriptor.capabilities.timedWaitAnyEnable = true;
-    wgpu::Instance instance = wgpuCreateInstance(&instanceDescriptor);
 
-    wgpu::RequestAdapterOptions adapterOptions {};
-    static wgpu::Adapter localAdapter;
-
-    // Synchronously (wait until) acquire Adapter
-    instance.WaitAny(
-        instance.RequestAdapter(
-            &adapterOptions, wgpu::CallbackMode::WaitAnyOnly,
-            [](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message) {
-                if (status != wgpu::RequestAdapterStatus::Success) {
-                    printf("Failed to get an adapter: %s\n", message.data);
-                    return;
-                }
-                localAdapter = std::move(adapter);
-            }),
-        UINT64_MAX);
-    assert(localAdapter != nullptr);
-
-#ifndef NDEBUG
-    wgpu::AdapterInfo info;
-    localAdapter.GetInfo(&info);
-    printf("Using adapter: \" %s \"\n", info.device.data);
-#endif
-
-    wgpu::DeviceDescriptor deviceDesc {};
-    deviceDesc.SetDeviceLostCallback(
-        wgpu::CallbackMode::AllowSpontaneous,
-        [](const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView message) {
-            const char* reasonName = "";
-            switch (reason) {
-                case wgpu::DeviceLostReason::Unknown:           reasonName = "Unknown";         break;
-                case wgpu::DeviceLostReason::Destroyed:         reasonName = "Destroyed";       break;
-                case wgpu::DeviceLostReason::InstanceDropped:   reasonName = "InstanceDropped"; break;
-                case wgpu::DeviceLostReason::FailedCreation:    reasonName = "FailedCreation";  break;
-                default:                                        reasonName = "UNREACHABLE";     break;
-            }
-            printf("%s error: %s\n", reasonName, message.data);
-        });
-
-    deviceDesc.SetUncapturedErrorCallback(
-        [](const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView message) {
-            const char* errorTypeName = "";
-            switch (type) {
-                case wgpu::ErrorType::Validation:  errorTypeName = "Validation";      break;
-                case wgpu::ErrorType::OutOfMemory: errorTypeName = "Out of memory";   break;
-                case wgpu::ErrorType::Unknown:     errorTypeName = "Unknown";         break;
-                case wgpu::ErrorType::Internal:    errorTypeName = "Internal";        break;
-                default:                           errorTypeName = "UNREACHABLE";     break;
-            }
-            printf("%s error: %s\n", errorTypeName, message.data);
-        });
-
-    // Synchronously (wait until) create the device
-    static wgpu::Device localDevice;
-    instance.WaitAny(
-        localAdapter.RequestDevice(
-            &deviceDesc, wgpu::CallbackMode::WaitAnyOnly,
-            [](wgpu::RequestDeviceStatus status, wgpu::Device device, wgpu::StringView message) {
-                if (status != wgpu::RequestDeviceStatus::Success) {
-                    printf("Failed to get an device: %s\n", message.data);
-                    return;
-                }
-                localDevice = std::move(device);
-                //queue = sample->device.GetQueue();
-            }),
-        UINT64_MAX);
-
-    assert(localDevice != nullptr);
-#endif
-
-    surfaceConfiguration.presentMode = WGPUPresentMode_Fifo;
-    surfaceConfiguration.alphaMode   = WGPUCompositeAlphaMode_Auto;
-    surfaceConfiguration.usage       = WGPUTextureUsage_RenderAttachment;
-    surfaceConfiguration.width       = wgpu_surface_width;
-    surfaceConfiguration.height      = wgpu_surface_height;
-    
-#ifdef __EMSCRIPTEN__
     wgpu::SurfaceDescriptorFromCanvasHTMLSelector html_surface_desc = {};
     html_surface_desc.selector = "#canvas";
     wgpu::SurfaceDescriptor surface_desc = {};
@@ -359,10 +317,56 @@ static bool InitWGPU(GLFWwindow* window)
     wgpu::Adapter adapter = {};
     wgpu_preferred_fmt = (WGPUTextureFormat)surface.GetPreferredFormat(adapter);
 
-    surfaceConfiguration.device      = wgpu_device;
-    surfaceConfiguration.format      = wgpu_preferred_fmt;
+    wgpu_surface_configuration.device      = wgpu_device;
+    wgpu_surface_configuration.format      = wgpu_preferred_fmt;
 #else
+    WGPUInstanceDescriptor instanceDescriptor {};
+    instanceDescriptor.capabilities.timedWaitAnyEnable = true;
+    wgpu::Instance instance = wgpuCreateInstance(&instanceDescriptor);
 
+    wgpu::RequestAdapterOptions adapterOptions {};
+
+    auto RequestAdapter = [](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message)
+    {
+        if (status != wgpu::RequestAdapterStatus::Success)
+        {
+            printf("Failed to get an adapter: %s\n", message.data);
+            return;
+        }
+        localAdapter = std::move(adapter);
+    };
+
+    // Synchronously (wait until) acquire Adapter
+    auto waitedAdapterFunc { instance.RequestAdapter(&adapterOptions, wgpu::CallbackMode::WaitAnyOnly, RequestAdapter) };
+    instance.WaitAny(waitedAdapterFunc, UINT64_MAX);
+    assert(localAdapter != nullptr);
+
+#ifndef NDEBUG
+    wgpu::AdapterInfo info;
+    localAdapter.GetInfo(&info);
+    printf("Using adapter: \" %s \"\n", info.device.data);
+#endif
+
+    // Set device callback functions
+    wgpu::DeviceDescriptor deviceDesc {};
+    deviceDesc.SetDeviceLostCallback(wgpu::CallbackMode::AllowSpontaneous, wgpu_device_lost_callback);
+    deviceDesc.SetUncapturedErrorCallback(wgpu_error_callback);
+
+    auto RequestDevice = [](wgpu::RequestDeviceStatus status, wgpu::Device device, wgpu::StringView message)
+    {
+        if (status != wgpu::RequestDeviceStatus::Success)
+        {
+            printf("Failed to get an device: %s\n", message.data);
+            return;
+        }
+        localDevice = std::move(device);
+    };
+
+    // Synchronously (wait until) create the device
+    auto waitedDeviceFunc { localAdapter.RequestDevice(&deviceDesc, wgpu::CallbackMode::WaitAnyOnly, RequestDevice) };
+    instance.WaitAny(waitedDeviceFunc, UINT64_MAX);
+    assert(localDevice != nullptr);
+    
     wgpu::Surface surface = wgpu::glfw::CreateSurfaceForWindow(instance, window);
     if (!surface)
         return false;
@@ -374,21 +378,21 @@ static bool InitWGPU(GLFWwindow* window)
 
     wgpu_device   = localDevice.MoveToCHandle();
 
-    surfaceConfiguration.device      = wgpu_device;
-    surfaceConfiguration.format      = wgpu_preferred_fmt;
-    surface.Configure((const wgpu::SurfaceConfiguration *) &surfaceConfiguration);
-
+    wgpu_surface_configuration.device      = wgpu_device;
+    wgpu_surface_configuration.format      = wgpu_preferred_fmt;
+    surface.Configure((const wgpu::SurfaceConfiguration *) &wgpu_surface_configuration);
 #endif
+
     wgpu_instance = instance.MoveToCHandle();
     wgpu_surface  = surface.MoveToCHandle();
 
     return true;
 }
 
-void surfaceResize(int width, int height)
+void ResizeSurface(int width, int height)
 {
-    wgpu_surface_width  = surfaceConfiguration.width  = width;
-    wgpu_surface_height = surfaceConfiguration.height = height;
+    wgpu_surface_width  = wgpu_surface_configuration.width  = width;
+    wgpu_surface_height = wgpu_surface_configuration.height = height;
 
-    wgpuSurfaceConfigure( wgpu_surface, (WGPUSurfaceConfiguration *) &surfaceConfiguration );
+    wgpuSurfaceConfigure(wgpu_surface, (WGPUSurfaceConfiguration *) &wgpu_surface_configuration);
 }
