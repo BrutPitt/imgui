@@ -22,11 +22,11 @@
 #endif
 
 #include <GLFW/glfw3.h>
-#include <webgpu/webgpu.h>
-#include <webgpu/webgpu_cpp.h>
 
 // This example can also compile and run with Emscripten! See 'Makefile.emscripten' for details.
 #ifdef __EMSCRIPTEN__
+#include <webgpu/webgpu.h>
+#include <webgpu/webgpu_cpp.h>
 #include "../libs/emscripten/emscripten_mainloop_stub.h"
 #endif
 
@@ -34,6 +34,7 @@
 static WGPUInstance             wgpu_instance = nullptr;
 static WGPUDevice               wgpu_device = nullptr;
 static WGPUSurface              wgpu_surface = nullptr;
+static WGPUQueue                wgpu_queue = nullptr;
 static WGPUTextureFormat        wgpu_preferred_fmt = WGPUTextureFormat_Undefined;  // acquired from SurfaceCapabilities
 static WGPUSurfaceConfiguration wgpu_surface_configuration {};
 static int                      wgpu_surface_width = 1280;
@@ -44,7 +45,7 @@ static bool InitWGPU(GLFWwindow* window);
 static void ResizeSurface(int width, int height);
 
 #ifndef __EMSCRIPTEN__
-void wgpu_device_lost_callback(const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView message)
+static void wgpu_device_lost_callback(const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView message)
 {
     const char* reasonName = "";
     switch (reason)
@@ -55,10 +56,10 @@ void wgpu_device_lost_callback(const wgpu::Device&, wgpu::DeviceLostReason reaso
         case wgpu::DeviceLostReason::FailedCreation:  reasonName = "FailedCreation";  break;
         default:                                      reasonName = "UNREACHABLE";     break;
     }
-    printf("%s error: %s\n", reasonName, message.data);
+    printf("%s device message: %s\n", reasonName, message.data);
 }
 
-void wgpu_error_callback(const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView message)
+static void wgpu_error_callback(const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView message)
 {
     const char* errorTypeName = "";
     switch (type)
@@ -95,8 +96,7 @@ int main(int, char**)
     // Initialize the WebGPU environment
     if (!InitWGPU(window))
     {
-        if (window)
-            glfwDestroyWindow(window);
+        glfwDestroyWindow(window);
         glfwTerminate();
         return 1;
     }
@@ -172,6 +172,7 @@ int main(int, char**)
             ImGui_ImplGlfw_Sleep(10);
             continue;
         }
+
         // React to changes in screen size
         int width, height;
         glfwGetFramebufferSize((GLFWwindow*)window, &width, &height);
@@ -232,17 +233,17 @@ int main(int, char**)
         // Tick needs to be called in Dawn to display validation errors
         wgpuDeviceTick(wgpu_device);
 #endif
-        WGPUSurfaceTexture surfaceTexture;
+        WGPUSurfaceTexture surfaceTexture = {};
         wgpuSurfaceGetCurrentTexture(wgpu_surface, &surfaceTexture);
 
         WGPUTextureViewDescriptor viewDescriptor {};
         viewDescriptor.format          = wgpu_preferred_fmt;
-        viewDescriptor.dimension       = WGPUTextureViewDimension_2D;
+        viewDescriptor.dimension       = WGPUTextureViewDimension_2D ;
         viewDescriptor.mipLevelCount   = WGPU_MIP_LEVEL_COUNT_UNDEFINED;
         viewDescriptor.arrayLayerCount = WGPU_ARRAY_LAYER_COUNT_UNDEFINED;
         viewDescriptor.aspect          = WGPUTextureAspect_All;
 
-        WGPUTextureView textureView = wgpuTextureCreateView((WGPUTexture &) surfaceTexture, &viewDescriptor);
+        WGPUTextureView textureView = wgpuTextureCreateView(surfaceTexture.texture, &viewDescriptor);
 
         WGPURenderPassColorAttachment color_attachments {};
         color_attachments.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
@@ -262,17 +263,17 @@ int main(int, char**)
         WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &render_pass_desc);
         ImGui_ImplWGPU_RenderDrawData(ImGui::GetDrawData(), pass);
         wgpuRenderPassEncoderEnd(pass);
+        wgpuRenderPassEncoderRelease(pass);
 
         WGPUCommandBufferDescriptor cmd_buffer_desc {};
         WGPUCommandBuffer cmd_buffer = wgpuCommandEncoderFinish(encoder, &cmd_buffer_desc);
-        WGPUQueue queue = wgpuDeviceGetQueue(wgpu_device);
-        wgpuQueueSubmit(queue, 1, &cmd_buffer);
+        wgpuQueueSubmit(wgpu_queue, 1, &cmd_buffer);
 
 #ifndef __EMSCRIPTEN__
         wgpuSurfacePresent(wgpu_surface);
+        //wgpuInstanceProcessEvents(wgpu_instance);
 #endif
-        wgpuTextureViewRelease(color_attachments.view);
-        wgpuRenderPassEncoderRelease(pass);
+        wgpuTextureViewRelease(textureView);
         wgpuCommandEncoderRelease(encoder);
         wgpuCommandBufferRelease(cmd_buffer);
     }
@@ -285,6 +286,12 @@ int main(int, char**)
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
 
+    wgpuSurfaceUnconfigure(wgpu_surface);
+    wgpuSurfaceRelease(wgpu_surface);
+    wgpuQueueRelease(wgpu_queue);
+    wgpuDeviceRelease(wgpu_device);
+    wgpuInstanceRelease(wgpu_instance);
+
     glfwDestroyWindow(window);
     glfwTerminate();
 
@@ -293,9 +300,6 @@ int main(int, char**)
 
 static bool InitWGPU(GLFWwindow* window)
 {
-    static wgpu::Adapter localAdapter;
-    static wgpu::Device localDevice;
-
     wgpu_surface_configuration.presentMode = WGPUPresentMode_Fifo;
     wgpu_surface_configuration.alphaMode   = WGPUCompositeAlphaMode_Auto;
     wgpu_surface_configuration.usage       = WGPUTextureUsage_RenderAttachment;
@@ -320,13 +324,20 @@ static bool InitWGPU(GLFWwindow* window)
     wgpu_surface_configuration.device      = wgpu_device;
     wgpu_surface_configuration.format      = wgpu_preferred_fmt;
 #else
-    WGPUInstanceDescriptor instanceDescriptor {};
-    instanceDescriptor.capabilities.timedWaitAnyEnable = true;
-    wgpu::Instance instance = wgpuCreateInstance(&instanceDescriptor);
 
+    wgpu::InstanceDescriptor instanceDescriptor {};
+    instanceDescriptor.capabilities.timedWaitAnyEnable = true;
+    wgpu::Instance instance = wgpu::CreateInstance(&instanceDescriptor);
+
+    static wgpu::Adapter localAdapter;
     wgpu::RequestAdapterOptions adapterOptions {};
 
-    auto RequestAdapter = [](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message)
+#if defined(_WIN32) || defined(WIN32)
+    // force DirectX backend due to Vulkan trouble with GetPhysicalDeviceCooperativeMatrixPropertiesKHR (DAWN branch 16/2/2025)
+    adapterOptions.backendType = wgpu::BackendType::D3D11; // or D3D12 in w10/W11   due
+#endif
+
+    auto onRequestAdapter = [](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message)
     {
         if (status != wgpu::RequestAdapterStatus::Success)
         {
@@ -337,7 +348,7 @@ static bool InitWGPU(GLFWwindow* window)
     };
 
     // Synchronously (wait until) acquire Adapter
-    auto waitedAdapterFunc { instance.RequestAdapter(&adapterOptions, wgpu::CallbackMode::WaitAnyOnly, RequestAdapter) };
+    auto waitedAdapterFunc { instance.RequestAdapter(&adapterOptions, wgpu::CallbackMode::WaitAnyOnly, onRequestAdapter) };
     instance.WaitAny(waitedAdapterFunc, UINT64_MAX);
     assert(localAdapter != nullptr);
 
@@ -349,23 +360,13 @@ static bool InitWGPU(GLFWwindow* window)
 
     // Set device callback functions
     wgpu::DeviceDescriptor deviceDesc {};
+
     deviceDesc.SetDeviceLostCallback(wgpu::CallbackMode::AllowSpontaneous, wgpu_device_lost_callback);
     deviceDesc.SetUncapturedErrorCallback(wgpu_error_callback);
 
-    auto RequestDevice = [](wgpu::RequestDeviceStatus status, wgpu::Device device, wgpu::StringView message)
-    {
-        if (status != wgpu::RequestDeviceStatus::Success)
-        {
-            printf("Failed to get an device: %s\n", message.data);
-            return;
-        }
-        localDevice = std::move(device);
-    };
-
-    // Synchronously (wait until) create the device
-    auto waitedDeviceFunc { localAdapter.RequestDevice(&deviceDesc, wgpu::CallbackMode::WaitAnyOnly, RequestDevice) };
-    instance.WaitAny(waitedDeviceFunc, UINT64_MAX);
-    assert(localDevice != nullptr);
+    // get device Synchronously
+    wgpu_device = localAdapter.CreateDevice(&deviceDesc).MoveToCHandle();
+    assert(wgpu_device != nullptr);
     
     wgpu::Surface surface = wgpu::glfw::CreateSurfaceForWindow(instance, window);
     if (!surface)
@@ -376,8 +377,6 @@ static bool InitWGPU(GLFWwindow* window)
     surface.GetCapabilities(localAdapter, &capabilities);
     wgpu_preferred_fmt = (WGPUTextureFormat) capabilities.formats[0];
 
-    wgpu_device   = localDevice.MoveToCHandle();
-
     wgpu_surface_configuration.device      = wgpu_device;
     wgpu_surface_configuration.format      = wgpu_preferred_fmt;
     surface.Configure((const wgpu::SurfaceConfiguration *) &wgpu_surface_configuration);
@@ -385,14 +384,20 @@ static bool InitWGPU(GLFWwindow* window)
 
     wgpu_instance = instance.MoveToCHandle();
     wgpu_surface  = surface.MoveToCHandle();
+    wgpu_queue    = wgpuDeviceGetQueue(wgpu_device);
 
     return true;
 }
 
 void ResizeSurface(int width, int height)
 {
-    wgpu_surface_width  = wgpu_surface_configuration.width  = width;
-    wgpu_surface_height = wgpu_surface_configuration.height = height;
+    wgpu_surface_configuration.width  = wgpu_surface_width  = width;
+    wgpu_surface_configuration.height = wgpu_surface_height = height;
 
+    // Workaround to avoid black screen (round to ceiling) float Viewport
+    wgpu_surface_configuration.width  ++;
+    wgpu_surface_configuration.height ++;
+
+    wgpuSurfaceUnconfigure(wgpu_surface);
     wgpuSurfaceConfigure(wgpu_surface, (WGPUSurfaceConfiguration *) &wgpu_surface_configuration);
 }
