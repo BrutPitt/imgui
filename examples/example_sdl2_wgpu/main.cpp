@@ -36,6 +36,7 @@
 static WGPUInstance             wgpu_instance = nullptr;
 static WGPUDevice               wgpu_device = nullptr;
 static WGPUSurface              wgpu_surface = nullptr;
+static WGPUQueue                wgpu_queue = nullptr;
 static WGPUTextureFormat        wgpu_preferred_fmt = WGPUTextureFormat_Undefined;  // acquired from SurfaceCapabilities
 static WGPUSurfaceConfiguration wgpu_surface_configuration {};
 static int                      wgpu_surface_width = 1280;
@@ -46,7 +47,7 @@ static bool InitWGPU(SDL_Window* window);
 static void ResizeSurface(int width, int height);
 
 #ifndef __EMSCRIPTEN__
-void wgpu_device_lost_callback(const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView message)
+static void wgpu_device_lost_callback(const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView message)
 {
     const char* reasonName = "";
     switch (reason)
@@ -57,10 +58,10 @@ void wgpu_device_lost_callback(const wgpu::Device&, wgpu::DeviceLostReason reaso
         case wgpu::DeviceLostReason::FailedCreation:  reasonName = "FailedCreation";  break;
         default:                                      reasonName = "UNREACHABLE";     break;
     }
-    printf("%s error: %s\n", reasonName, message.data);
+    printf("%s device message: %s\n", reasonName, message.data);
 }
 
-void wgpu_error_callback(const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView message)
+static void wgpu_error_callback(const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView message)
 {
     const char* errorTypeName = "";
     switch (type)
@@ -78,6 +79,14 @@ void wgpu_error_callback(const wgpu::Device&, wgpu::ErrorType type, wgpu::String
 // Main code
 int main(int, char**)
 {
+
+#if !defined(__EMSCRIPTEN__)
+    #if defined(unix) || defined(__unix__)
+    // if not specified SDL_getWGPUSurface prefers always X11 also on Wayland, uncomment to force to use Wayland
+        //SDL_SetHint(SDL_HINT_VIDEODRIVER, "wayland");  // or (outside code) export SDL_VIDEODRIVER=wayland environment variable
+    #endif                                               // or    "      "    export SDL_VIDEODRIVER=$XDG_SESSION_TYPE to get the current session type
+#endif
+
     // Init SDL
     SDL_Init(SDL_INIT_VIDEO);
     SDL_Window *window = SDL_CreateWindow("Dear ImGui SDL+WebGPU example", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, wgpu_surface_width, wgpu_surface_height, SDL_WINDOW_RESIZABLE);
@@ -167,7 +176,7 @@ int main(int, char**)
             ImGui_ImplWGPU_InvalidateDeviceObjects();
             ResizeSurface(width, height);
             ImGui_ImplWGPU_CreateDeviceObjects();
-            continue;
+            //continue;
         }
 
         // Start the Dear ImGui frame
@@ -230,7 +239,7 @@ int main(int, char**)
         viewDescriptor.arrayLayerCount = WGPU_ARRAY_LAYER_COUNT_UNDEFINED;
         viewDescriptor.aspect          = WGPUTextureAspect_All;
 
-        WGPUTextureView textureView = wgpuTextureCreateView((WGPUTexture &) surfaceTexture, &viewDescriptor);
+        WGPUTextureView textureView    = wgpuTextureCreateView(surfaceTexture.texture, &viewDescriptor);
 
         WGPURenderPassColorAttachment color_attachments {};
         color_attachments.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
@@ -259,7 +268,7 @@ int main(int, char**)
 #ifndef __EMSCRIPTEN__
         wgpuSurfacePresent(wgpu_surface);
 #endif
-        wgpuTextureViewRelease(color_attachments.view);
+        wgpuTextureViewRelease(textureView);
         wgpuRenderPassEncoderRelease(pass);
         wgpuCommandEncoderRelease(encoder);
         wgpuCommandBufferRelease(cmd_buffer);
@@ -272,6 +281,12 @@ int main(int, char**)
     ImGui_ImplWGPU_Shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();
+
+    wgpuSurfaceUnconfigure(wgpu_surface);
+    wgpuSurfaceRelease(wgpu_surface);
+    wgpuQueueRelease(wgpu_queue);
+    wgpuDeviceRelease(wgpu_device);
+    wgpuInstanceRelease(wgpu_instance);
 
     // Terminate SDL
     SDL_DestroyWindow(window);
@@ -296,7 +311,6 @@ static bool InitWGPU(SDL_Window* window)
     wgpu_device = emscripten_webgpu_get_device();
     if (!wgpu_device)
         return false;
-
     wgpu::SurfaceDescriptorFromCanvasHTMLSelector html_surface_desc = {};
     html_surface_desc.selector = "#canvas";
     wgpu::SurfaceDescriptor surface_desc = {};
@@ -309,13 +323,19 @@ static bool InitWGPU(SDL_Window* window)
     wgpu_surface_configuration.device      = wgpu_device;
     wgpu_surface_configuration.format      = wgpu_preferred_fmt;
 #else
-    WGPUInstanceDescriptor instanceDescriptor {};
+    wgpu::InstanceDescriptor instanceDescriptor {};
     instanceDescriptor.capabilities.timedWaitAnyEnable = true;
-    wgpu::Instance instance = wgpuCreateInstance(&instanceDescriptor);
+    wgpu::Instance instance = wgpu::CreateInstance(&instanceDescriptor);
 
     wgpu::RequestAdapterOptions adapterOptions {};
 
-    auto RequestAdapter = [](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message)
+#if defined(_WIN32) || defined(WIN32)
+    // Windows users: uncomment to force DirectX backend instead of Vulkan
+    // adapterOptions.backendType = wgpu::BackendType::D3D12; // to use D3D12 backend in W10/W11
+    // adapterOptions.backendType = wgpu::BackendType::D3D11; // to use D3D11 backend in W10/W11
+#endif
+
+    auto onRequestAdapter = [](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message)
     {
         if (status != wgpu::RequestAdapterStatus::Success)
         {
@@ -326,7 +346,7 @@ static bool InitWGPU(SDL_Window* window)
     };
 
     // Synchronously (wait until) acquire Adapter
-    auto waitedAdapterFunc { instance.RequestAdapter(&adapterOptions, wgpu::CallbackMode::WaitAnyOnly, RequestAdapter) };
+    auto waitedAdapterFunc { instance.RequestAdapter(&adapterOptions, wgpu::CallbackMode::WaitAnyOnly, onRequestAdapter) };
     instance.WaitAny(waitedAdapterFunc, UINT64_MAX);
     assert(localAdapter != nullptr);
 
@@ -341,20 +361,9 @@ static bool InitWGPU(SDL_Window* window)
     deviceDesc.SetDeviceLostCallback(wgpu::CallbackMode::AllowSpontaneous, wgpu_device_lost_callback);
     deviceDesc.SetUncapturedErrorCallback(wgpu_error_callback);
 
-    auto RequestDevice = [](wgpu::RequestDeviceStatus status, wgpu::Device device, wgpu::StringView message)
-    {
-        if (status != wgpu::RequestDeviceStatus::Success)
-        {
-            printf("Failed to get an device: %s\n", message.data);
-            return;
-        }
-        localDevice = std::move(device);
-    };
-
-    // Synchronously (wait until) create the device
-    auto waitedDeviceFunc { localAdapter.RequestDevice(&deviceDesc, wgpu::CallbackMode::WaitAnyOnly, RequestDevice) };
-    instance.WaitAny(waitedDeviceFunc, UINT64_MAX);
-    assert(localDevice != nullptr);
+    // get device Synchronously
+    wgpu_device = localAdapter.CreateDevice(&deviceDesc).MoveToCHandle();
+    assert(wgpu_device != nullptr);
 
     wgpu::Surface surface = SDL_getWGPUSurface(instance.Get(), window);
     if (!surface)
@@ -365,8 +374,6 @@ static bool InitWGPU(SDL_Window* window)
     surface.GetCapabilities(localAdapter, &capabilities);
     wgpu_preferred_fmt = (WGPUTextureFormat) capabilities.formats[0];
 
-    wgpu_device   = localDevice.MoveToCHandle();
-
     wgpu_surface_configuration.device      = wgpu_device;
     wgpu_surface_configuration.format      = wgpu_preferred_fmt;
     surface.Configure((const wgpu::SurfaceConfiguration *) &wgpu_surface_configuration);
@@ -374,14 +381,15 @@ static bool InitWGPU(SDL_Window* window)
 
     wgpu_instance = instance.MoveToCHandle();
     wgpu_surface  = surface.MoveToCHandle();
+    wgpu_queue    = wgpuDeviceGetQueue(wgpu_device);
 
     return true;
 }
 
 void ResizeSurface(int width, int height)
 {
-    wgpu_surface_width  = wgpu_surface_configuration.width  = width;
-    wgpu_surface_height = wgpu_surface_configuration.height = height;
+    wgpu_surface_configuration.width  = wgpu_surface_width  = width;
+    wgpu_surface_configuration.height = wgpu_surface_height = height;
 
     wgpuSurfaceConfigure( wgpu_surface, (WGPUSurfaceConfiguration *) &wgpu_surface_configuration );
 }
