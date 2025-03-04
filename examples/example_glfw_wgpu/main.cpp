@@ -79,6 +79,8 @@ static void glfw_error_callback(int error, const char* description)
     printf("GLFW Error %d: %s\n", error, description);
 }
 
+
+
 // Main code
 int main(int, char**)
 {
@@ -181,7 +183,6 @@ int main(int, char**)
             ImGui_ImplWGPU_InvalidateDeviceObjects();
             ResizeSurface(width, height);
             ImGui_ImplWGPU_CreateDeviceObjects();
-            continue;
         }
 
         // Start the Dear ImGui frame
@@ -333,8 +334,9 @@ static bool InitWGPU(GLFWwindow* window)
     wgpu::RequestAdapterOptions adapterOptions {};
 
 #if defined(_WIN32) || defined(WIN32)
-    // force DirectX backend due to Vulkan trouble with GetPhysicalDeviceCooperativeMatrixPropertiesKHR (DAWN branch 16/2/2025)
-    adapterOptions.backendType = wgpu::BackendType::D3D11; // or D3D12 in w10/W11   due
+    // Windows users: uncomment to force DirectX backend instead of Vulkan
+    // adapterOptions.backendType = wgpu::BackendType::D3D12; // to use D3D12 backend in W10/W11
+    // adapterOptions.backendType = wgpu::BackendType::D3D11; // to use D3D11 backend in W10/W11
 #endif
 
     auto onRequestAdapter = [](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message)
@@ -394,10 +396,5 @@ void ResizeSurface(int width, int height)
     wgpu_surface_configuration.width  = wgpu_surface_width  = width;
     wgpu_surface_configuration.height = wgpu_surface_height = height;
 
-    // Workaround to avoid black screen (round to ceiling) float Viewport
-    wgpu_surface_configuration.width  ++;
-    wgpu_surface_configuration.height ++;
-
-    wgpuSurfaceUnconfigure(wgpu_surface);
     wgpuSurfaceConfigure(wgpu_surface, (WGPUSurfaceConfiguration *) &wgpu_surface_configuration);
 }
