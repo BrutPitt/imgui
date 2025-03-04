@@ -62,6 +62,15 @@ else()
     option(TINT_BUILD_WGSL_WRITER "Build the WGSL output writer" ON)
   endif()
 
+# check if WAYLAND is the current Session Type and enable DAWN_USE_WAYLAND Wayland option @compile time
+# You can override this using: cmake -DDAWN_USE_WAYLAND=X (X = ON | OFF)
+  if(UNIX)
+    if ($ENV{XDG_SESSION_TYPE} MATCHES wayland)
+      option(DAWN_USE_WAYLAND "Enable support for Wayland surface" ON)
+    endif()
+  endif()
+
+
   add_subdirectory("${IMGUI_DAWN_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/dawn" EXCLUDE_FROM_ALL)
 
   set(LIBRARIES webgpu_dawn webgpu_cpp webgpu_glfw glfw)
