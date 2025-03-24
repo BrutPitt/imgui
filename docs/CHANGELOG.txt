@@ -36,6 +36,43 @@ HOW TO UPDATE?
 - Please report any issue!
 
 -----------------------------------------------------------------------
+ VERSION 1.92.0 WIP (In Progress)
+-----------------------------------------------------------------------
+
+Breaking changes:
+
+- Backends: SDL3: Fixed casing typo in function name: (#8509, #8163, #7998, #7988) [@puugz]
+  - Imgui_ImplSDLGPU3_PrepareDrawData() -> ImGui_ImplSDLGPU3_PrepareDrawData()
+
+Other changes:
+
+- IO: variations in analog-only components of gamepad events do not interfere
+  with trickling of mouse position events (#4921, #8508)
+- Windows: fixed SetNextWindowCollapsed()/SetWindowCollapsed() breaking
+  codepath that preserve last contents size when collapsed, resulting in
+  programmatically uncollapsing auto-sizing windows having them flicker size
+  for a frame. (#7691) [@achabense]
+- Error Handling: added better error report and recovery for extraneous
+  EndPopup() call. (#1651, #8499)
+- Style, InputText: added ImGuiCol_InputTextCursor to configure color of
+  the InputText cursor/caret. (#7031)
+- Misc: added extra operators to ImVec4 in IMGUI_DEFINE_MATH_OPERATORS block. (#8510) [@gan74]
+- Backends: SDL2, SDL3, OSX: Fill gamepad inputs and set ImGuiBackendFlags_HasGamepad
+  regardless of ImGuiConfigFlags_NavEnableGamepad being set. (#8508)
+
+
+-----------------------------------------------------------------------
+ VERSION 1.91.9b (Released 2025-03-17)
+-----------------------------------------------------------------------
+
+Decorated log and release notes: https://github.com/ocornut/imgui/releases/tag/v1.91.9b
+
+- Tables: Fixed assert when loading .ini settings with reordered columns. (#8496, #7934)
+- Tables: Fixed issues when loading .ini settings for a table with columns using
+  ImGuiTableColumnFlags_DefaultHide or ImGuiTableColumnFlags_DefaultSort. (#8496, #7934)
+
+
+-----------------------------------------------------------------------
  VERSION 1.91.9 (Released 2025-03-14)
 -----------------------------------------------------------------------
 
@@ -64,6 +101,8 @@ Breaking changes:
 - Backends: Vulkan: Added 'uint32_t api_version' argument to ImGui_ImplVulkan_LoadFunctions().
   Note that it was also added to ImGui_ImplVulkan_InitInfo but for the later it is optional.
   (#8326, #8365, #8400)
+- Internals: Fonts: ImFontAtlas::ConfigData[] has been renamed to ImFontAtlas::Sources[],
+- Internals: Fonts: ImFont::ConfigData[], ConfigDataCount has been renamed to Sources[], SourcesCount.
 - Internals: Menus: reworked mangling of menu windows to use "###Menu_00" etc. instead
   of "##Menu_00", allowing them to also store the menu name before it. This shouldn't
   affect code unless directly accessing menu window from their mangled name.
@@ -602,7 +641,7 @@ Decorated log and release notes: https://github.com/ocornut/imgui/releases/tag/v
 
 Breaking changes:
 
- - Internals: using multiple overlayed ButtonBehavior() with same ID will now have the
+ - Internals: using multiple overlaid ButtonBehavior() with same ID will now have the
    io.ConfigDebugHighlightIdConflicts=true feature emit a warning. (#8030)
    It was one of the rare case where using same ID is legal. Workarounds:
    - use single ButtonBehavior() call with multiple _MouseButton flags
