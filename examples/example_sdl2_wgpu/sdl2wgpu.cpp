@@ -32,7 +32,7 @@ WGPUSurface SDL_getWGPUSurface(WGPUInstance instance, SDL_Window* window)
     WGPUSurfaceDescriptorFromCanvasHTMLSelector surfaceSourceDesc = { chainedStruct, "canvas" };
     surfaceDescriptor.nextInChain = &surfaceSourceDesc.chain;
 /*
-    // NEW in DAWN but not used in EMSCRIPTEN (yet)
+    // not used in EMSCRIPTEN (yet), but in DAWN EMSCRIPTEN fork emdawnwebgpu: https://dawn.googlesource.com/dawn/+/refs/heads/main/src/emdawnwebgpu/
     chainedStruct.sType = WGPUSType_EmscriptenSurfaceSourceCanvasHTMLSelector;
     const WGPUEmscriptenSurfaceSourceCanvasHTMLSelector surfaceSourceDesc = { chainedStruct, "canvas" };
     surfaceDescriptor.nextInChain = &surfaceSourceDesc.chain;
@@ -88,4 +88,5 @@ WGPUSurface SDL_getWGPUSurface(WGPUInstance instance, SDL_Window* window)
     return wgpuInstanceCreateSurface(instance, &surfaceDescriptor);
 
 }
+
 
