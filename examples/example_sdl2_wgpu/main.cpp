@@ -22,7 +22,6 @@
 #endif
 #define SDL_MAIN_HANDLED
 #include "sdl2wgpu.h"
-#include <SDL.h>
 
 #include <webgpu/webgpu.h>
 #include <webgpu/webgpu_cpp.h>
@@ -76,15 +75,58 @@ static void wgpu_error_callback(const wgpu::Device&, wgpu::ErrorType type, wgpu:
 }
 #endif
 
+static WGPUTexture check_surface_texture_status(SDL_Window* window)
+{
+    WGPUSurfaceTexture surfaceTexture;
+    wgpuSurfaceGetCurrentTexture(wgpu_surface, &surfaceTexture);
+
+    switch ( surfaceTexture.status )
+    {
+#if !defined(IMGUI_IMPL_WEBGPU_BACKEND_DAWN)
+        case WGPUSurfaceGetCurrentTextureStatus_Success:
+            break;
+#else
+        case WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal:
+            break;
+        case WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal:
+#endif
+        case WGPUSurfaceGetCurrentTextureStatus_Timeout:
+        case WGPUSurfaceGetCurrentTextureStatus_Outdated:
+        case WGPUSurfaceGetCurrentTextureStatus_Lost:
+        // if the status is NOT optimal let's try to reconfigure the surface
+        {
+#ifndef NDEBUG
+            printf("Bad surface texture status: %d\n", surfaceTexture.status);
+#endif
+/*            if (surfaceTexture.texture)
+                wgpuTextureRelease(surfaceTexture.texture);*/
+            int width, height;
+            SDL_GetWindowSize(window, &width, &height);
+            if ( width > 0 && height > 0 )
+            {
+                wgpu_surface_configuration.width  = width;
+                wgpu_surface_configuration.height = height;
+
+                wgpuSurfaceConfigure(wgpu_surface, &wgpu_surface_configuration);
+            }
+            return nullptr;
+        }
+        default:            // should never be reached
+            assert(!"Unexpected Surface Texture status error\n");
+            return nullptr;
+    }
+    return surfaceTexture.texture;
+}
+
 // Main code
 int main(int, char**)
 {
 
-#if !defined(__EMSCRIPTEN__)
-    #if defined(unix) || defined(__unix__)
-    // if not specified SDL_getWGPUSurface prefers always X11 also on Wayland, uncomment to force to use Wayland
-        //SDL_SetHint(SDL_HINT_VIDEODRIVER, "wayland");  // or (outside code) export SDL_VIDEODRIVER=wayland environment variable
-    #endif                                               // or    "      "    export SDL_VIDEODRIVER=$XDG_SESSION_TYPE to get the current session type
+#if defined(__linux__)
+    // it's necessary to specify "x11" or "wayland": default is "x11" it works also in wayland
+    // or comment the follow line and export SDL_VIDEODRIVER environment variable:
+    SDL_SetHint(SDL_HINT_VIDEODRIVER, "x11"); // export SDL_VIDEODRIVER=wayland             (to set wayland session type)
+                                              // export SDL_VIDEODRIVER=$XDG_SESSION_TYPE   (to get current session type: x11 | wayland)
 #endif
 
     // Init SDL
@@ -107,9 +149,7 @@ int main(int, char**)
 
     // Setup Platform/Renderer backends
     ImGui_ImplSDL2_InitForOther(window);
-#ifdef __EMSCRIPTEN__
-    //ImGui_ImplSDL2_InstallEmscriptenCallbacks(window, "#canvas");
-#endif
+
     ImGui_ImplWGPU_InitInfo init_info;
     init_info.Device = wgpu_device;
     init_info.NumFramesInFlight = 3;
@@ -179,11 +219,14 @@ int main(int, char**)
             //continue;
         }
 
+        // Check surface texture status
+        WGPUTexture texture = check_surface_texture_status(window);
+        if(!texture) continue;
+
         // Start the Dear ImGui frame
         ImGui_ImplWGPU_NewFrame();
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
-
 
         // 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear ImGui!).
         if (show_demo_window)
@@ -225,13 +268,6 @@ int main(int, char**)
         // Rendering
         ImGui::Render();
 
-#ifndef __EMSCRIPTEN__
-        // Tick needs to be called in Dawn to display validation errors
-        wgpuDeviceTick(wgpu_device);
-#endif
-        WGPUSurfaceTexture surfaceTexture;
-        wgpuSurfaceGetCurrentTexture(wgpu_surface, &surfaceTexture);
-
         WGPUTextureViewDescriptor viewDescriptor {};
         viewDescriptor.format          = wgpu_preferred_fmt;
         viewDescriptor.dimension       = WGPUTextureViewDimension_2D;
@@ -239,7 +275,7 @@ int main(int, char**)
         viewDescriptor.arrayLayerCount = WGPU_ARRAY_LAYER_COUNT_UNDEFINED;
         viewDescriptor.aspect          = WGPUTextureAspect_All;
 
-        WGPUTextureView textureView    = wgpuTextureCreateView(surfaceTexture.texture, &viewDescriptor);
+        WGPUTextureView textureView    = wgpuTextureCreateView(texture, &viewDescriptor);
 
         WGPURenderPassColorAttachment color_attachments {};
         color_attachments.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
@@ -262,11 +298,12 @@ int main(int, char**)
 
         WGPUCommandBufferDescriptor cmd_buffer_desc {};
         WGPUCommandBuffer cmd_buffer = wgpuCommandEncoderFinish(encoder, &cmd_buffer_desc);
-        WGPUQueue queue = wgpuDeviceGetQueue(wgpu_device);
-        wgpuQueueSubmit(queue, 1, &cmd_buffer);
+        wgpuQueueSubmit(wgpu_queue, 1, &cmd_buffer);
 
 #ifndef __EMSCRIPTEN__
         wgpuSurfacePresent(wgpu_surface);
+        // Tick needs to be called in Dawn to display validation errors
+        wgpuDeviceTick(wgpu_device);
 #endif
         wgpuTextureViewRelease(textureView);
         wgpuRenderPassEncoderRelease(pass);
@@ -287,6 +324,10 @@ int main(int, char**)
     wgpuQueueRelease(wgpu_queue);
     wgpuDeviceRelease(wgpu_device);
     wgpuInstanceRelease(wgpu_instance);
+#ifndef __EMSCRIPTEN__
+    // wait to flush all WGPU operations before to continue
+    wgpuDeviceTick(wgpu_device);
+#endif
 
     // Terminate SDL
     SDL_DestroyWindow(window);
@@ -298,7 +339,6 @@ int main(int, char**)
 static bool InitWGPU(SDL_Window* window)
 {
     static wgpu::Adapter localAdapter;
-    static wgpu::Device localDevice;
 
     wgpu_surface_configuration.presentMode = WGPUPresentMode_Fifo;
     wgpu_surface_configuration.alphaMode   = WGPUCompositeAlphaMode_Auto;
@@ -328,12 +368,6 @@ static bool InitWGPU(SDL_Window* window)
     wgpu::Instance instance = wgpu::CreateInstance(&instanceDescriptor);
 
     wgpu::RequestAdapterOptions adapterOptions {};
-
-#if defined(_WIN32) || defined(WIN32)
-    // Windows users: uncomment to force DirectX backend instead of Vulkan
-    // adapterOptions.backendType = wgpu::BackendType::D3D12; // to use D3D12 backend in W10/W11
-    // adapterOptions.backendType = wgpu::BackendType::D3D11; // to use D3D11 backend in W10/W11
-#endif
 
     auto onRequestAdapter = [](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message)
     {

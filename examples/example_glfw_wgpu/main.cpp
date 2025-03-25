@@ -79,7 +79,48 @@ static void glfw_error_callback(int error, const char* description)
     printf("GLFW Error %d: %s\n", error, description);
 }
 
+static WGPUTexture check_surface_texture_status(GLFWwindow * window)
+{
+    WGPUSurfaceTexture surfaceTexture;
+    wgpuSurfaceGetCurrentTexture(wgpu_surface, &surfaceTexture);
 
+    switch ( surfaceTexture.status )
+    {
+#if !defined(IMGUI_IMPL_WEBGPU_BACKEND_DAWN)
+        case WGPUSurfaceGetCurrentTextureStatus_Success:
+            break;
+#else
+        case WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal:
+            break;
+        case WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal:
+#endif
+        case WGPUSurfaceGetCurrentTextureStatus_Timeout:
+        case WGPUSurfaceGetCurrentTextureStatus_Outdated:
+        case WGPUSurfaceGetCurrentTextureStatus_Lost:
+        // if the status is NOT Optimal let's try to reconfigure the surface
+        {
+#ifndef NDEBUG
+            printf("Bad surface texture status: %d\n", surfaceTexture.status);
+#endif
+            if (surfaceTexture.texture)
+                wgpuTextureRelease(surfaceTexture.texture);
+            int width, height;
+            glfwGetFramebufferSize(window, &width, &height);
+            if ( width > 0 && height > 0 )
+            {
+                wgpu_surface_configuration.width  = width;
+                wgpu_surface_configuration.height = height;
+
+                wgpuSurfaceConfigure(wgpu_surface, &wgpu_surface_configuration);
+            }
+            return nullptr;
+        }
+        default:            // should never be reached
+            assert(!"Unexpected Surface Texture status error\n");
+            return nullptr;
+    }
+    return surfaceTexture.texture;
+}
 
 // Main code
 int main(int, char**)
@@ -185,6 +226,10 @@ int main(int, char**)
             ImGui_ImplWGPU_CreateDeviceObjects();
         }
 
+        // Check surface texture status
+        WGPUTexture texture = check_surface_texture_status(window);
+        if(!texture) continue;
+
         // Start the Dear ImGui frame
         ImGui_ImplWGPU_NewFrame();
         ImGui_ImplGlfw_NewFrame();
@@ -230,13 +275,6 @@ int main(int, char**)
         // Rendering
         ImGui::Render();
 
-#ifndef __EMSCRIPTEN__
-        // Tick needs to be called in Dawn to display validation errors
-        wgpuDeviceTick(wgpu_device);
-#endif
-        WGPUSurfaceTexture surfaceTexture = {};
-        wgpuSurfaceGetCurrentTexture(wgpu_surface, &surfaceTexture);
-
         WGPUTextureViewDescriptor viewDescriptor {};
         viewDescriptor.format          = wgpu_preferred_fmt;
         viewDescriptor.dimension       = WGPUTextureViewDimension_2D ;
@@ -244,7 +282,7 @@ int main(int, char**)
         viewDescriptor.arrayLayerCount = WGPU_ARRAY_LAYER_COUNT_UNDEFINED;
         viewDescriptor.aspect          = WGPUTextureAspect_All;
 
-        WGPUTextureView textureView = wgpuTextureCreateView(surfaceTexture.texture, &viewDescriptor);
+        WGPUTextureView textureView = wgpuTextureCreateView(texture, &viewDescriptor);
 
         WGPURenderPassColorAttachment color_attachments {};
         color_attachments.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
@@ -264,7 +302,6 @@ int main(int, char**)
         WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &render_pass_desc);
         ImGui_ImplWGPU_RenderDrawData(ImGui::GetDrawData(), pass);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
 
         WGPUCommandBufferDescriptor cmd_buffer_desc {};
         WGPUCommandBuffer cmd_buffer = wgpuCommandEncoderFinish(encoder, &cmd_buffer_desc);
@@ -272,9 +309,11 @@ int main(int, char**)
 
 #ifndef __EMSCRIPTEN__
         wgpuSurfacePresent(wgpu_surface);
-        //wgpuInstanceProcessEvents(wgpu_instance);
+        // Tick needs to be called in Dawn to display validation errors
+        wgpuDeviceTick(wgpu_device);
 #endif
         wgpuTextureViewRelease(textureView);
+        wgpuRenderPassEncoderRelease(pass);
         wgpuCommandEncoderRelease(encoder);
         wgpuCommandBufferRelease(cmd_buffer);
     }
@@ -333,12 +372,6 @@ static bool InitWGPU(GLFWwindow* window)
     static wgpu::Adapter localAdapter;
     wgpu::RequestAdapterOptions adapterOptions {};
 
-#if defined(_WIN32) || defined(WIN32)
-    // Windows users: uncomment to force DirectX backend instead of Vulkan
-    // adapterOptions.backendType = wgpu::BackendType::D3D12; // to use D3D12 backend in W10/W11
-    // adapterOptions.backendType = wgpu::BackendType::D3D11; // to use D3D11 backend in W10/W11
-#endif
-
     auto onRequestAdapter = [](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message)
     {
         if (status != wgpu::RequestAdapterStatus::Success)
@@ -362,7 +395,6 @@ static bool InitWGPU(GLFWwindow* window)
 
     // Set device callback functions
     wgpu::DeviceDescriptor deviceDesc {};
-
     deviceDesc.SetDeviceLostCallback(wgpu::CallbackMode::AllowSpontaneous, wgpu_device_lost_callback);
     deviceDesc.SetUncapturedErrorCallback(wgpu_error_callback);
 
