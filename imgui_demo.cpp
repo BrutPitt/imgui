@@ -1,4 +1,4 @@
-// dear imgui, v1.91.9 WIP
+// dear imgui, v1.92.0 WIP
 // (demo code)
 
 // Help:
@@ -70,10 +70,9 @@ Index of this file:
 
 // [SECTION] Forward Declarations
 // [SECTION] Helpers
-// [SECTION] Helpers: ExampleTreeNode, ExampleMemberInfo (for use by Property Editor & Multi-Select demos)
 // [SECTION] Demo Window / ShowDemoWindow()
 // [SECTION] DemoWindowMenuBar()
-// [SECTION] DemoWindowWidgets()
+// [SECTION] Helpers: ExampleTreeNode, ExampleMemberInfo (for use by Property Editor & Multi-Select demos)
 // [SECTION] DemoWindowWidgetsBasic()
 // [SECTION] DemoWindowWidgetsBullets()
 // [SECTION] DemoWindowWidgetsCollapsingHeaders()
@@ -98,6 +97,7 @@ Index of this file:
 // [SECTION] DemoWindowWidgetsTooltips()
 // [SECTION] DemoWindowWidgetsTreeNodes()
 // [SECTION] DemoWindowWidgetsVerticalSliders()
+// [SECTION] DemoWindowWidgets()
 // [SECTION] DemoWindowLayout()
 // [SECTION] DemoWindowPopups()
 // [SECTION] DemoWindowTables()
@@ -159,6 +159,7 @@ Index of this file:
 #pragma clang diagnostic ignored "-Wold-style-cast"                 // warning: use of old-style cast                           // yes, they are more terse.
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"        // warning: 'xx' is deprecated: The POSIX name for this..   // for strdup used in demo code (so user can copy & paste the code)
 #pragma clang diagnostic ignored "-Wint-to-void-pointer-cast"       // warning: cast to 'void *' from smaller integer type
+#pragma clang diagnostic ignored "-Wformat"                         // warning: format specifies type 'int' but the argument has type 'unsigned int'
 #pragma clang diagnostic ignored "-Wformat-security"                // warning: format string is not a string literal
 #pragma clang diagnostic ignored "-Wexit-time-destructors"          // warning: declaration requires an exit-time destructor    // exit-time destruction order is undefined. if MemFree() leads to users code that has been disabled before exit it might cause problems. ImGui coding style welcomes static/globals.
 #pragma clang diagnostic ignored "-Wunused-macros"                  // warning: macro is not used                               // we define snprintf/vsnprintf on Windows so they are available, but not always used.
@@ -167,6 +168,7 @@ Index of this file:
 #pragma clang diagnostic ignored "-Wreserved-id-macro"              // warning: macro name is a reserved identifier
 #pragma clang diagnostic ignored "-Wimplicit-int-float-conversion"  // warning: implicit conversion from 'xxx' to 'float' may lose precision
 #pragma clang diagnostic ignored "-Wunsafe-buffer-usage"            // warning: 'xxx' is an unsafe pointer used for buffer access
+#pragma clang diagnostic ignored "-Wswitch-default"                 // warning: 'switch' missing 'default' label
 #elif defined(__GNUC__)
 #pragma GCC diagnostic ignored "-Wpragmas"                          // warning: unknown option after '#pragma GCC diagnostic' kind
 #pragma GCC diagnostic ignored "-Wfloat-equal"                      // warning: comparing floating-point with '==' or '!=' is unsafe
@@ -250,35 +252,16 @@ static void ShowExampleMenuFile();
 // (because the link time of very large functions tends to grow non-linearly)
 static void DemoWindowMenuBar(ImGuiDemoWindowData* demo_data);
 static void DemoWindowWidgets(ImGuiDemoWindowData* demo_data);
-static void DemoWindowWidgetsBasic();
-static void DemoWindowWidgetsBullets();
-static void DemoWindowWidgetsCollapsingHeaders();
-static void DemoWindowWidgetsComboBoxes();
-static void DemoWindowWidgetsColorAndPickers();
-static void DemoWindowWidgetsDataTypes();
-static void DemoWindowWidgetsDisableBlocks(ImGuiDemoWindowData* demo_data);
-static void DemoWindowWidgetsDragAndDrop();
-static void DemoWindowWidgetsDragsAndSliders();
-static void DemoWindowWidgetsImages();
-static void DemoWindowWidgetsListBoxes();
-static void DemoWindowWidgetsPlotting();
-static void DemoWindowWidgetsMultiComponents();
-static void DemoWindowWidgetsProgressBars();
-static void DemoWindowWidgetsQueryingStatuses();
-static void DemoWindowWidgetsSelectables();
-static void DemoWindowWidgetsSelectionAndMultiSelect(ImGuiDemoWindowData* demo_data);
-static void DemoWindowWidgetsTabs();
-static void DemoWindowWidgetsText();
-static void DemoWindowWidgetsTextFilter();
-static void DemoWindowWidgetsTextInput();
-static void DemoWindowWidgetsTooltips();
-static void DemoWindowWidgetsTreeNodes();
-static void DemoWindowWidgetsVerticalSliders();
 static void DemoWindowLayout();
 static void DemoWindowPopups();
 static void DemoWindowTables();
 static void DemoWindowColumns();
 static void DemoWindowInputs();
+
+// Helper tree functions used by Property Editor & Multi-Select demos
+struct ExampleTreeNode;
+static ExampleTreeNode* ExampleTree_CreateNode(const char* name, int uid, ExampleTreeNode* parent);
+static void             ExampleTree_DestroyNode(ExampleTreeNode* node);
 
 //-----------------------------------------------------------------------------
 // [SECTION] Helpers
@@ -305,97 +288,6 @@ extern void*                        GImGuiDemoMarkerCallbackUserData;
 ImGuiDemoMarkerCallback             GImGuiDemoMarkerCallback = NULL;
 void*                               GImGuiDemoMarkerCallbackUserData = NULL;
 #define IMGUI_DEMO_MARKER(section)  do { if (GImGuiDemoMarkerCallback != NULL) GImGuiDemoMarkerCallback(__FILE__, __LINE__, section, GImGuiDemoMarkerCallbackUserData); } while (0)
-
-//-----------------------------------------------------------------------------
-// [SECTION] Helpers: ExampleTreeNode, ExampleMemberInfo (for use by Property Editor etc.)
-//-----------------------------------------------------------------------------
-
-// Simple representation for a tree
-// (this is designed to be simple to understand for our demos, not to be fancy or efficient etc.)
-struct ExampleTreeNode
-{
-    // Tree structure
-    char                        Name[28] = "";
-    int                         UID = 0;
-    ExampleTreeNode*            Parent = NULL;
-    ImVector<ExampleTreeNode*>  Childs;
-    unsigned short              IndexInParent = 0;  // Maintaining this allows us to implement linear traversal more easily
-
-    // Leaf Data
-    bool                        HasData = false;    // All leaves have data
-    bool                        DataMyBool = true;
-    int                         DataMyInt = 128;
-    ImVec2                      DataMyVec2 = ImVec2(0.0f, 3.141592f);
-};
-
-// Simple representation of struct metadata/serialization data.
-// (this is a minimal version of what a typical advanced application may provide)
-struct ExampleMemberInfo
-{
-    const char*     Name;       // Member name
-    ImGuiDataType   DataType;   // Member type
-    int             DataCount;  // Member count (1 when scalar)
-    int             Offset;     // Offset inside parent structure
-};
-
-// Metadata description of ExampleTreeNode struct.
-static const ExampleMemberInfo ExampleTreeNodeMemberInfos[]
-{
-    { "MyName",     ImGuiDataType_String,  1, offsetof(ExampleTreeNode, Name) },
-    { "MyBool",     ImGuiDataType_Bool,    1, offsetof(ExampleTreeNode, DataMyBool) },
-    { "MyInt",      ImGuiDataType_S32,     1, offsetof(ExampleTreeNode, DataMyInt) },
-    { "MyVec2",     ImGuiDataType_Float,   2, offsetof(ExampleTreeNode, DataMyVec2) },
-};
-
-static ExampleTreeNode* ExampleTree_CreateNode(const char* name, int uid, ExampleTreeNode* parent)
-{
-    ExampleTreeNode* node = IM_NEW(ExampleTreeNode);
-    snprintf(node->Name, IM_ARRAYSIZE(node->Name), "%s", name);
-    node->UID = uid;
-    node->Parent = parent;
-    node->IndexInParent = parent ? (unsigned short)parent->Childs.Size : 0;
-    if (parent)
-        parent->Childs.push_back(node);
-    return node;
-}
-
-static void ExampleTree_DestroyNode(ExampleTreeNode* node)
-{
-    for (ExampleTreeNode* child_node : node->Childs)
-        ExampleTree_DestroyNode(child_node);
-    IM_DELETE(node);
-}
-
-// Create example tree data
-// (this allocates _many_ more times than most other code in either Dear ImGui or others demo)
-static ExampleTreeNode* ExampleTree_CreateDemoTree()
-{
-    static const char* root_names[] = { "Apple", "Banana", "Cherry", "Kiwi", "Mango", "Orange", "Pear", "Pineapple", "Strawberry", "Watermelon" };
-    const size_t NAME_MAX_LEN = sizeof(ExampleTreeNode::Name);
-    char name_buf[NAME_MAX_LEN];
-    int uid = 0;
-    ExampleTreeNode* node_L0 = ExampleTree_CreateNode("<ROOT>", ++uid, NULL);
-    const int root_items_multiplier = 2;
-    for (int idx_L0 = 0; idx_L0 < IM_ARRAYSIZE(root_names) * root_items_multiplier; idx_L0++)
-    {
-        snprintf(name_buf, IM_ARRAYSIZE(name_buf), "%s %d", root_names[idx_L0 / root_items_multiplier], idx_L0 % root_items_multiplier);
-        ExampleTreeNode* node_L1 = ExampleTree_CreateNode(name_buf, ++uid, node_L0);
-        const int number_of_childs = (int)strlen(node_L1->Name);
-        for (int idx_L1 = 0; idx_L1 < number_of_childs; idx_L1++)
-        {
-            snprintf(name_buf, IM_ARRAYSIZE(name_buf), "Child %d", idx_L1);
-            ExampleTreeNode* node_L2 = ExampleTree_CreateNode(name_buf, ++uid, node_L1);
-            node_L2->HasData = true;
-            if (idx_L1 == 0)
-            {
-                snprintf(name_buf, IM_ARRAYSIZE(name_buf), "Sub-child %d", 0);
-                ExampleTreeNode* node_L3 = ExampleTree_CreateNode(name_buf, ++uid, node_L2);
-                node_L3->HasData = true;
-            }
-        }
-    }
-    return node_L0;
-}
 
 //-----------------------------------------------------------------------------
 // [SECTION] Demo Window / ShowDemoWindow()
@@ -817,53 +709,94 @@ static void DemoWindowMenuBar(ImGuiDemoWindowData* demo_data)
 }
 
 //-----------------------------------------------------------------------------
-// [SECTION] DemoWindowWidgets()
+// [SECTION] Helpers: ExampleTreeNode, ExampleMemberInfo (for use by Property Editor & Multi-Select demos)
 //-----------------------------------------------------------------------------
 
-static void DemoWindowWidgets(ImGuiDemoWindowData* demo_data)
+// Simple representation for a tree
+// (this is designed to be simple to understand for our demos, not to be fancy or efficient etc.)
+struct ExampleTreeNode
 {
-    IMGUI_DEMO_MARKER("Widgets");
-    //ImGui::SetNextItemOpen(true, ImGuiCond_Once);
-    if (!ImGui::CollapsingHeader("Widgets"))
-        return;
+    // Tree structure
+    char                        Name[28] = "";
+    int                         UID = 0;
+    ExampleTreeNode* Parent = NULL;
+    ImVector<ExampleTreeNode*>  Childs;
+    unsigned short              IndexInParent = 0;  // Maintaining this allows us to implement linear traversal more easily
 
-    const bool disable_all = demo_data->DisableSections; // The Checkbox for that is inside the "Disabled" section at the bottom
-    if (disable_all)
-        ImGui::BeginDisabled();
+    // Leaf Data
+    bool                        HasData = false;    // All leaves have data
+    bool                        DataMyBool = true;
+    int                         DataMyInt = 128;
+    ImVec2                      DataMyVec2 = ImVec2(0.0f, 3.141592f);
+};
 
-    DemoWindowWidgetsBasic();
-    DemoWindowWidgetsBullets();
-    DemoWindowWidgetsCollapsingHeaders();
-    DemoWindowWidgetsComboBoxes();
-    DemoWindowWidgetsColorAndPickers();
-    DemoWindowWidgetsDataTypes();
+// Simple representation of struct metadata/serialization data.
+// (this is a minimal version of what a typical advanced application may provide)
+struct ExampleMemberInfo
+{
+    const char* Name;       // Member name
+    ImGuiDataType   DataType;   // Member type
+    int             DataCount;  // Member count (1 when scalar)
+    int             Offset;     // Offset inside parent structure
+};
 
-    if (disable_all)
-        ImGui::EndDisabled();
-    DemoWindowWidgetsDisableBlocks(demo_data);
-    if (disable_all)
-        ImGui::BeginDisabled();
+// Metadata description of ExampleTreeNode struct.
+static const ExampleMemberInfo ExampleTreeNodeMemberInfos[]
+{
+    { "MyName",     ImGuiDataType_String,  1, offsetof(ExampleTreeNode, Name) },
+    { "MyBool",     ImGuiDataType_Bool,    1, offsetof(ExampleTreeNode, DataMyBool) },
+    { "MyInt",      ImGuiDataType_S32,     1, offsetof(ExampleTreeNode, DataMyInt) },
+    { "MyVec2",     ImGuiDataType_Float,   2, offsetof(ExampleTreeNode, DataMyVec2) },
+};
 
-    DemoWindowWidgetsDragAndDrop();
-    DemoWindowWidgetsDragsAndSliders();
-    DemoWindowWidgetsImages();
-    DemoWindowWidgetsListBoxes();
-    DemoWindowWidgetsMultiComponents();
-    DemoWindowWidgetsPlotting();
-    DemoWindowWidgetsProgressBars();
-    DemoWindowWidgetsQueryingStatuses();
-    DemoWindowWidgetsSelectables();
-    DemoWindowWidgetsSelectionAndMultiSelect(demo_data);
-    DemoWindowWidgetsTabs();
-    DemoWindowWidgetsText();
-    DemoWindowWidgetsTextFilter();
-    DemoWindowWidgetsTextInput();
-    DemoWindowWidgetsTooltips();
-    DemoWindowWidgetsTreeNodes();
-    DemoWindowWidgetsVerticalSliders();
+static ExampleTreeNode* ExampleTree_CreateNode(const char* name, int uid, ExampleTreeNode* parent)
+{
+    ExampleTreeNode* node = IM_NEW(ExampleTreeNode);
+    snprintf(node->Name, IM_ARRAYSIZE(node->Name), "%s", name);
+    node->UID = uid;
+    node->Parent = parent;
+    node->IndexInParent = parent ? (unsigned short)parent->Childs.Size : 0;
+    if (parent)
+        parent->Childs.push_back(node);
+    return node;
+}
 
-    if (disable_all)
-        ImGui::EndDisabled();
+static void ExampleTree_DestroyNode(ExampleTreeNode* node)
+{
+    for (ExampleTreeNode* child_node : node->Childs)
+        ExampleTree_DestroyNode(child_node);
+    IM_DELETE(node);
+}
+
+// Create example tree data
+// (this allocates _many_ more times than most other code in either Dear ImGui or others demo)
+static ExampleTreeNode* ExampleTree_CreateDemoTree()
+{
+    static const char* root_names[] = { "Apple", "Banana", "Cherry", "Kiwi", "Mango", "Orange", "Pear", "Pineapple", "Strawberry", "Watermelon" };
+    const size_t NAME_MAX_LEN = sizeof(ExampleTreeNode::Name);
+    char name_buf[NAME_MAX_LEN];
+    int uid = 0;
+    ExampleTreeNode* node_L0 = ExampleTree_CreateNode("<ROOT>", ++uid, NULL);
+    const int root_items_multiplier = 2;
+    for (int idx_L0 = 0; idx_L0 < IM_ARRAYSIZE(root_names) * root_items_multiplier; idx_L0++)
+    {
+        snprintf(name_buf, IM_ARRAYSIZE(name_buf), "%s %d", root_names[idx_L0 / root_items_multiplier], idx_L0 % root_items_multiplier);
+        ExampleTreeNode* node_L1 = ExampleTree_CreateNode(name_buf, ++uid, node_L0);
+        const int number_of_childs = (int)strlen(node_L1->Name);
+        for (int idx_L1 = 0; idx_L1 < number_of_childs; idx_L1++)
+        {
+            snprintf(name_buf, IM_ARRAYSIZE(name_buf), "Child %d", idx_L1);
+            ExampleTreeNode* node_L2 = ExampleTree_CreateNode(name_buf, ++uid, node_L1);
+            node_L2->HasData = true;
+            if (idx_L1 == 0)
+            {
+                snprintf(name_buf, IM_ARRAYSIZE(name_buf), "Sub-child %d", 0);
+                ExampleTreeNode* node_L3 = ExampleTree_CreateNode(name_buf, ++uid, node_L2);
+                node_L3->HasData = true;
+            }
+        }
+    }
+    return node_L0;
 }
 
 //-----------------------------------------------------------------------------
@@ -2455,7 +2388,7 @@ static const char* ExampleNames[] =
 struct ExampleSelectionWithDeletion : ImGuiSelectionBasicStorage
 {
     // Find which item should be Focused after deletion.
-    // Call _before_ item submission. Retunr an index in the before-deletion item list, your item loop should call SetKeyboardFocusHere() on it.
+    // Call _before_ item submission. Return an index in the before-deletion item list, your item loop should call SetKeyboardFocusHere() on it.
     // The subsequent ApplyDeletionPostLoop() code will use it to apply Selection.
     // - We cannot provide this logic in core Dear ImGui because we don't have access to selection data.
     // - We don't actually manipulate the ImVector<> here, only in ApplyDeletionPostLoop(), but using similar API for consistency and flexibility.
@@ -4184,6 +4117,56 @@ static void DemoWindowWidgetsVerticalSliders()
 }
 
 //-----------------------------------------------------------------------------
+// [SECTION] DemoWindowWidgets()
+//-----------------------------------------------------------------------------
+
+static void DemoWindowWidgets(ImGuiDemoWindowData* demo_data)
+{
+    IMGUI_DEMO_MARKER("Widgets");
+    //ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+    if (!ImGui::CollapsingHeader("Widgets"))
+        return;
+
+    const bool disable_all = demo_data->DisableSections; // The Checkbox for that is inside the "Disabled" section at the bottom
+    if (disable_all)
+        ImGui::BeginDisabled();
+
+    DemoWindowWidgetsBasic();
+    DemoWindowWidgetsBullets();
+    DemoWindowWidgetsCollapsingHeaders();
+    DemoWindowWidgetsComboBoxes();
+    DemoWindowWidgetsColorAndPickers();
+    DemoWindowWidgetsDataTypes();
+
+    if (disable_all)
+        ImGui::EndDisabled();
+    DemoWindowWidgetsDisableBlocks(demo_data);
+    if (disable_all)
+        ImGui::BeginDisabled();
+
+    DemoWindowWidgetsDragAndDrop();
+    DemoWindowWidgetsDragsAndSliders();
+    DemoWindowWidgetsImages();
+    DemoWindowWidgetsListBoxes();
+    DemoWindowWidgetsMultiComponents();
+    DemoWindowWidgetsPlotting();
+    DemoWindowWidgetsProgressBars();
+    DemoWindowWidgetsQueryingStatuses();
+    DemoWindowWidgetsSelectables();
+    DemoWindowWidgetsSelectionAndMultiSelect(demo_data);
+    DemoWindowWidgetsTabs();
+    DemoWindowWidgetsText();
+    DemoWindowWidgetsTextFilter();
+    DemoWindowWidgetsTextInput();
+    DemoWindowWidgetsTooltips();
+    DemoWindowWidgetsTreeNodes();
+    DemoWindowWidgetsVerticalSliders();
+
+    if (disable_all)
+        ImGui::EndDisabled();
+}
+
+//-----------------------------------------------------------------------------
 // [SECTION] DemoWindowLayout()
 //-----------------------------------------------------------------------------
 
@@ -5416,7 +5399,7 @@ struct MyItem
                 return (sort_spec->SortDirection == ImGuiSortDirection_Ascending) ? -1 : +1;
         }
 
-        // qsort() is instable so always return a way to differenciate items.
+        // qsort() is instable so always return a way to differentiate items.
         // Your own compare function may want to avoid fallback on implicit sort specs.
         // e.g. a Name compare if it wasn't already part of the sort specs.
         return (a->ID - b->ID);
@@ -7779,7 +7762,7 @@ static void DemoWindowInputs()
             ImGui::Text("IsWindowFocused: %d, Shortcut: %s", ImGui::IsWindowFocused(), ImGui::Shortcut(key_chord, flags) ? "PRESSED" : "...");
 
             // 2: InputText also polling for CTRL+A: it always uses _RouteFocused internally (gets priority when active)
-            // (Commmented because the owner-aware version of Shortcut() is still in imgui_internal.h)
+            // (Commented because the owner-aware version of Shortcut() is still in imgui_internal.h)
             //char str[16] = "Press CTRL+A";
             //ImGui::Spacing();
             //ImGui::InputText("InputTextB", str, IM_ARRAYSIZE(str), ImGuiInputTextFlags_ReadOnly);
@@ -7806,7 +7789,7 @@ static void DemoWindowInputs()
             {
                 ImGui::Text("(in PopupF)");
                 ImGui::Text("IsWindowFocused: %d, Shortcut: %s", ImGui::IsWindowFocused(), ImGui::Shortcut(key_chord, flags) ? "PRESSED" : "...");
-                // (Commmented because the owner-aware version of Shortcut() is still in imgui_internal.h)
+                // (Commented because the owner-aware version of Shortcut() is still in imgui_internal.h)
                 //ImGui::InputText("InputTextG", str, IM_ARRAYSIZE(str), ImGuiInputTextFlags_ReadOnly);
                 //ImGui::Text("IsWindowFocused: %d, Shortcut: %s", ImGui::IsWindowFocused(), ImGui::Shortcut(key_chord, flags, ImGui::GetItemID()) ? "PRESSED" : "...");
                 ImGui::EndPopup();
@@ -8434,7 +8417,7 @@ void ImGui::ShowStyleEditor(ImGuiStyle* ref)
                 ImGui::EndTooltip();
             }
             ImGui::SameLine();
-            HelpMarker("When drawing circle primitives with \"num_segments == 0\" tesselation will be calculated automatically.");
+            HelpMarker("When drawing circle primitives with \"num_segments == 0\" tessellation will be calculated automatically.");
 
             ImGui::DragFloat("Global Alpha", &style.Alpha, 0.005f, 0.20f, 1.0f, "%.2f"); // Not exposing zero here so user doesn't "lose" the UI (zero alpha clips all widgets). But application code could have a toggle to switch between zero and non-zero.
             ImGui::DragFloat("Disabled Alpha", &style.DisabledAlpha, 0.005f, 0.0f, 1.0f, "%.2f"); ImGui::SameLine(); HelpMarker("Additional alpha multiplier for disabled items (multiply over current value of Alpha).");
@@ -8465,7 +8448,7 @@ void ImGui::ShowUserGuide()
     ImGui::BulletText("CTRL+Tab to select a window.");
     if (io.FontAllowUserScaling)
         ImGui::BulletText("CTRL+Mouse Wheel to zoom window contents.");
-    ImGui::BulletText("While inputing text:\n");
+    ImGui::BulletText("While inputting text:\n");
     ImGui::Indent();
     ImGui::BulletText("CTRL+Left/Right to word jump.");
     ImGui::BulletText("CTRL+A or double-click to select all.");
@@ -8896,7 +8879,7 @@ struct ExampleAppConsole
                 else
                 {
                     // Multiple matches. Complete as much as we can..
-                    // So inputing "C"+Tab will complete to "CL" then display "CLEAR" and "CLASSIFY" as matches.
+                    // So inputting "C"+Tab will complete to "CL" then display "CLEAR" and "CLASSIFY" as matches.
                     int match_len = (int)(word_end - word_start);
                     for (;;)
                     {
@@ -10385,7 +10368,7 @@ struct ExampleAssetsBrowser
         Selection.Clear();
     }
 
-    // Logic would be written in the main code BeginChild() and outputing to local variables.
+    // Logic would be written in the main code BeginChild() and outputting to local variables.
     // We extracted it into a function so we can call it easily from multiple places.
     void UpdateLayoutSizes(float avail_width)
     {
