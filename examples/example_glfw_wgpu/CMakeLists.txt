@@ -27,6 +27,11 @@ set(IMGUI_DIR ../../)
 
 # Libraries
 if(EMSCRIPTEN)
+  if(EMSCRIPTEN_VERSION VERSION_GREATER_EQUAL "4.0.10")
+    set(IMGUI_EMSCRIPTEN_WEBGPU_FLAG "--use-port=emdawnwebgpu" CACHE STRING "Choose between --use-port=emdawnwebgpu (Dawn implementation of EMSCRIPTEN) and -sUSE_WEBGPU=1 (WGPU implementation of EMSCRIPTEN, deprecated in 4.0.10): default to --use-port=emdawnwebgpu for EMSCRIPTEN >= 4.0.10")
+  else()
+    set(IMGUI_EMSCRIPTEN_WEBGPU_FLAG "-sUSE_WEBGPU=1" CACHE STRING "Use -sUSE_WEBGPU=1 for EMSCRIPTEN WGPU implementation" FORCE)
+  endif()
   if(EMSCRIPTEN_VERSION VERSION_GREATER_EQUAL "3.1.57")
     set(IMGUI_EMSCRIPTEN_GLFW3 "--use-port=contrib.glfw3" CACHE STRING "Choose between --use-port=contrib.glfw3 and -sUSE_GLFW=3 for GLFW implementation (default to --use-port=contrib.glfw3)")
   else()
@@ -64,12 +69,11 @@ else()
 
 # check if WAYLAND is the current Session Type and enable DAWN_USE_WAYLAND Wayland option @compile time
 # You can override this using: cmake -DDAWN_USE_WAYLAND=X (X = ON | OFF)
-  if(UNIX)
+  if(LINUX)
     if ($ENV{XDG_SESSION_TYPE} MATCHES wayland)
       option(DAWN_USE_WAYLAND "Enable support for Wayland surface" ON)
     endif()
   endif()
-
 
   add_subdirectory("${IMGUI_DAWN_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/dawn" EXCLUDE_FROM_ALL)
 
@@ -88,7 +92,7 @@ add_executable(example_glfw_wgpu
   ${IMGUI_DIR}/imgui_tables.cpp
   ${IMGUI_DIR}/imgui_widgets.cpp
 )
-IF(NOT EMSCRIPTEN)
+IF(NOT EMSCRIPTEN OR "${IMGUI_EMSCRIPTEN_WEBGPU_FLAG}" STREQUAL "--use-port=emdawnwebgpu")
   target_compile_definitions(example_glfw_wgpu PUBLIC
     "IMGUI_IMPL_WEBGPU_BACKEND_DAWN"
   )
@@ -108,19 +112,29 @@ if(EMSCRIPTEN)
     )
   endif()
   message(STATUS "Using ${IMGUI_EMSCRIPTEN_GLFW3} GLFW implementation")
+  if("${IMGUI_EMSCRIPTEN_WEBGPU_FLAG}" STREQUAL "--use-port=emdawnwebgpu")
+    target_compile_options(example_glfw_wgpu PUBLIC
+        "${IMGUI_EMSCRIPTEN_WEBGPU_FLAG}"
+    )
+  endif()
+  message(STATUS "Using ${IMGUI_EMSCRIPTEN_WEBGPU_FLAG} WebGPU implementation")
+
   target_link_options(example_glfw_wgpu PRIVATE
-    "-sUSE_WEBGPU=1"
+    "${IMGUI_EMSCRIPTEN_WEBGPU_FLAG}"
     "${IMGUI_EMSCRIPTEN_GLFW3}"
     "-sWASM=1"
+    "-sASYNCIFY"
     "-sALLOW_MEMORY_GROWTH=1"
     "-sNO_EXIT_RUNTIME=0"
     "-sASSERTIONS=1"
     "-sDISABLE_EXCEPTION_CATCHING=1"
     "-sNO_FILESYSTEM=1"
+    "--shell-file=${CMAKE_CURRENT_LIST_DIR}/web/index.html"
+
   )
   set_target_properties(example_glfw_wgpu PROPERTIES OUTPUT_NAME "index")
   # copy our custom index.html to build directory
-  add_custom_command(TARGET example_glfw_wgpu POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_LIST_DIR}/web/index.html" $<TARGET_FILE_DIR:example_glfw_wgpu>
-  )
+#  add_custom_command(TARGET example_glfw_wgpu POST_BUILD
+#    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_LIST_DIR}/web/index.html" $<TARGET_FILE_DIR:example_glfw_wgpu>
+#  )
 endif()

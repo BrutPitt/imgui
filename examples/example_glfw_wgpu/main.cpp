@@ -16,7 +16,10 @@
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #include <emscripten/html5.h>
+
+#if !defined(IMGUI_IMPL_WEBGPU_BACKEND_DAWN)
 #include <emscripten/html5_webgpu.h>
+#endif
 #else
 #include <webgpu/webgpu_glfw.h>
 #endif
@@ -43,36 +46,6 @@ static int                      wgpu_surface_height = 720;
 // Forward declarations
 static bool InitWGPU(GLFWwindow* window);
 static void ResizeSurface(int width, int height);
-
-#ifndef __EMSCRIPTEN__
-static void wgpu_device_lost_callback(const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView message)
-{
-    const char* reasonName = "";
-    switch (reason)
-    {
-        case wgpu::DeviceLostReason::Unknown:           reasonName = "Unknown";         break;
-        case wgpu::DeviceLostReason::Destroyed:         reasonName = "Destroyed";       break;
-        case wgpu::DeviceLostReason::CallbackCancelled: reasonName = "InstanceDropped"; break;
-        case wgpu::DeviceLostReason::FailedCreation:    reasonName = "FailedCreation";  break;
-        default:                                        reasonName = "UNREACHABLE";     break;
-    }
-    printf("%s device message: %s\n", reasonName, message.data);
-}
-
-static void wgpu_error_callback(const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView message)
-{
-    const char* errorTypeName = "";
-    switch (type)
-    {
-        case wgpu::ErrorType::Validation:  errorTypeName = "Validation";      break;
-        case wgpu::ErrorType::OutOfMemory: errorTypeName = "Out of memory";   break;
-        case wgpu::ErrorType::Unknown:     errorTypeName = "Unknown";         break;
-        case wgpu::ErrorType::Internal:    errorTypeName = "Internal";        break;
-        default:                           errorTypeName = "UNREACHABLE";     break;
-    }
-    printf("%s error: %s\n", errorTypeName, message.data);
-}
-#endif
 
 static void glfw_error_callback(int error, const char* description)
 {
@@ -173,19 +146,19 @@ int main(int, char**)
     // - If no fonts are loaded, dear imgui will use the default font. You can also load multiple fonts and use ImGui::PushFont()/PopFont() to select them.
     // - AddFontFromFileTTF() will return the ImFont* so you can store it if you need to select the font among multiple.
     // - If the file cannot be loaded, the function will return a nullptr. Please handle those errors in your application (e.g. use an assertion, or display an error and quit).
+    // - The fonts will be rasterized at a given size (w/ oversampling) and stored into a texture when calling ImFontAtlas::Build()/GetTexDataAsXXXX(), which ImGui_ImplXXXX_NewFrame below will call.
     // - Use '#define IMGUI_ENABLE_FREETYPE' in your imconfig file to use Freetype for higher quality font rendering.
     // - Read 'docs/FONTS.md' for more instructions and details.
     // - Remember that in C/C++ if you want to include a backslash \ in a string literal you need to write a double backslash \\ !
     // - Emscripten allows preloading a file or folder to be accessible at runtime. See Makefile for details.
     //io.Fonts->AddFontDefault();
-    //style.FontSizeBase = 20.0f;
 #ifndef IMGUI_DISABLE_FILE_FUNCTIONS
-    //io.Fonts->AddFontFromFileTTF("fonts/segoeui.ttf");
-    //io.Fonts->AddFontFromFileTTF("fonts/DroidSans.ttf");
-    //io.Fonts->AddFontFromFileTTF("fonts/Roboto-Medium.ttf");
-    //io.Fonts->AddFontFromFileTTF("fonts/Cousine-Regular.ttf");
-    //io.Fonts->AddFontFromFileTTF("fonts/ProggyTiny.ttf");
-    //ImFont* font = io.Fonts->AddFontFromFileTTF("fonts/ArialUni.ttf");
+    //io.Fonts->AddFontFromFileTTF("fonts/segoeui.ttf", 18.0f);
+    //io.Fonts->AddFontFromFileTTF("fonts/DroidSans.ttf", 16.0f);
+    //io.Fonts->AddFontFromFileTTF("fonts/Roboto-Medium.ttf", 16.0f);
+    //io.Fonts->AddFontFromFileTTF("fonts/Cousine-Regular.ttf", 15.0f);
+    //io.Fonts->AddFontFromFileTTF("fonts/ProggyTiny.ttf", 10.0f);
+    //ImFont* font = io.Fonts->AddFontFromFileTTF("fonts/ArialUni.ttf", 18.0f, nullptr, io.Fonts->GetGlyphRangesJapanese());
     //IM_ASSERT(font != nullptr);
 #endif
 
@@ -338,44 +311,46 @@ int main(int, char**)
     return 0;
 }
 
+#if defined(IMGUI_IMPL_WEBGPU_BACKEND_DAWN)
+static void wgpu_device_lost_callback(const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView message)
+{
+    const char* reasonName = "";
+    switch (reason) {
+        case wgpu::DeviceLostReason::Unknown:         reasonName = "Unknown";         break;
+        case wgpu::DeviceLostReason::Destroyed:       reasonName = "Destroyed";       break;
+        case wgpu::DeviceLostReason::CallbackCancelled: reasonName = "InstanceDropped"; break;
+        case wgpu::DeviceLostReason::FailedCreation:  reasonName = "FailedCreation";  break;
+        default:                                      reasonName = "UNREACHABLE";     break;
+    }
+    printf("%s device message: %s\n", reasonName, message.data);
+}
+
+static void wgpu_error_callback(const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView message)
+{
+    const char* errorTypeName = "";
+    switch (type) {
+        case wgpu::ErrorType::Validation:  errorTypeName = "Validation";      break;
+        case wgpu::ErrorType::OutOfMemory: errorTypeName = "Out of memory";   break;
+        case wgpu::ErrorType::Unknown:     errorTypeName = "Unknown";         break;
+        case wgpu::ErrorType::Internal:    errorTypeName = "Internal";        break;
+        default:                           errorTypeName = "UNREACHABLE";     break;
+    }
+    printf("%s error: %s\n", errorTypeName, message.data);
+}
+
+// WebGPU initialization using DAWN (Native and WEB via EMSCRIPTEN)
 static bool InitWGPU(GLFWwindow* window)
 {
-    wgpu_surface_configuration.presentMode = WGPUPresentMode_Fifo;
-    wgpu_surface_configuration.alphaMode   = WGPUCompositeAlphaMode_Auto;
-    wgpu_surface_configuration.usage       = WGPUTextureUsage_RenderAttachment;
-    wgpu_surface_configuration.width       = wgpu_surface_width;
-    wgpu_surface_configuration.height      = wgpu_surface_height;
-
-#ifdef __EMSCRIPTEN__
-    wgpu::Instance instance = wgpuCreateInstance(nullptr);
-    wgpu_device = emscripten_webgpu_get_device();
-    if (!wgpu_device)
-        return false;
-
-    wgpu::SurfaceDescriptorFromCanvasHTMLSelector html_surface_desc = {};
-    html_surface_desc.selector = "#canvas";
-    wgpu::SurfaceDescriptor surface_desc = {};
-    surface_desc.nextInChain = &html_surface_desc;
-    wgpu::Surface surface = instance.CreateSurface(&surface_desc);
-
-    wgpu::Adapter adapter = {};
-    wgpu_preferred_fmt = (WGPUTextureFormat)surface.GetPreferredFormat(adapter);
-
-    wgpu_surface_configuration.device      = wgpu_device;
-    wgpu_surface_configuration.format      = wgpu_preferred_fmt;
-#else
-
-    wgpu::InstanceDescriptor instanceDescriptor {};
+    wgpu::InstanceDescriptor instanceDescriptor  = {};
     instanceDescriptor.capabilities.timedWaitAnyEnable = true;
     wgpu::Instance instance = wgpu::CreateInstance(&instanceDescriptor);
 
     static wgpu::Adapter localAdapter;
-    wgpu::RequestAdapterOptions adapterOptions {};
+    wgpu::RequestAdapterOptions adapterOptions;
 
-    auto onRequestAdapter = [](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message)
-    {
-        if (status != wgpu::RequestAdapterStatus::Success)
-        {
+
+    auto onRequestAdapter = [](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message) {
+        if (status != wgpu::RequestAdapterStatus::Success) {
             printf("Failed to get an adapter: %s\n", message.data);
             return;
         }
@@ -383,9 +358,9 @@ static bool InitWGPU(GLFWwindow* window)
     };
 
     // Synchronously (wait until) acquire Adapter
-    auto waitedAdapterFunc { instance.RequestAdapter(&adapterOptions, wgpu::CallbackMode::WaitAnyOnly, onRequestAdapter) };
-    instance.WaitAny(waitedAdapterFunc, UINT64_MAX);
-    assert(localAdapter != nullptr);
+    wgpu::Future  waitAdapterFunc { instance.RequestAdapter(&adapterOptions, wgpu::CallbackMode::WaitAnyOnly, onRequestAdapter) };
+    wgpu::WaitStatus waitStatusAdapter = instance.WaitAny(waitAdapterFunc, UINT64_MAX);
+    assert(localAdapter != nullptr && waitStatusAdapter == wgpu::WaitStatus::Success && "Error on Adapter request");
 
 #ifndef NDEBUG
     wgpu::AdapterInfo info;
@@ -394,27 +369,58 @@ static bool InitWGPU(GLFWwindow* window)
 #endif
 
     // Set device callback functions
-    wgpu::DeviceDescriptor deviceDesc {};
+    wgpu::DeviceDescriptor deviceDesc;
     deviceDesc.SetDeviceLostCallback(wgpu::CallbackMode::AllowSpontaneous, wgpu_device_lost_callback);
     deviceDesc.SetUncapturedErrorCallback(wgpu_error_callback);
 
-    // get device Synchronously
-    wgpu_device = localAdapter.CreateDevice(&deviceDesc).MoveToCHandle();
-    assert(wgpu_device != nullptr);
-    
+    static wgpu::Device acquireddevice;
+// get device Synchronously
+    auto onReuestDevice = [](wgpu::RequestDeviceStatus status, wgpu::Device localDevice, wgpu::StringView message) {
+        if (status != wgpu::RequestDeviceStatus::Success) {
+            printf("Failed to get an device: %s\n", message.data);
+            return;
+        }
+        acquireddevice = std::move(localDevice);
+    };
+
+    wgpu::Future waitDeviceFunc { localAdapter.RequestDevice(&deviceDesc, wgpu::CallbackMode::WaitAnyOnly, onReuestDevice) };
+    wgpu::WaitStatus waitStatusDevice = instance.WaitAny(waitDeviceFunc, UINT64_MAX);
+    assert(acquireddevice != nullptr && waitStatusDevice == wgpu::WaitStatus::Success && "Error on Device request");
+
+    wgpu_device = acquireddevice.MoveToCHandle();
+
+    // now DAWN has also a member class func to create device: adapter.CreateDevice (only native)
+    //device = localAdapter.CreateDevice(&deviceDesc);
+    //assert(device != nullptr && "Error creating the Device");
+#ifdef __EMSCRIPTEN__
+    wgpu::EmscriptenSurfaceSourceCanvasHTMLSelector canvasDesc{};
+    canvasDesc.selector = "#canvas";
+
+    wgpu::SurfaceDescriptor surfaceDesc = {};
+    surfaceDesc.nextInChain = &canvasDesc;
+    wgpu::Surface surface = instance.CreateSurface(&surfaceDesc);
+#else
+    // Create the surface.
     wgpu::Surface surface = wgpu::glfw::CreateSurfaceForWindow(instance, window);
     if (!surface)
         return false;
+
+#endif
 
     // Configure the surface.
     wgpu::SurfaceCapabilities capabilities;
     surface.GetCapabilities(localAdapter, &capabilities);
     wgpu_preferred_fmt = (WGPUTextureFormat) capabilities.formats[0];
 
+    wgpu_surface_configuration.presentMode = WGPUPresentMode_Fifo;
+    wgpu_surface_configuration.alphaMode   = WGPUCompositeAlphaMode_Auto;
+    wgpu_surface_configuration.usage       = WGPUTextureUsage_RenderAttachment;
+    wgpu_surface_configuration.width       = wgpu_surface_width;
+    wgpu_surface_configuration.height      = wgpu_surface_height;
     wgpu_surface_configuration.device      = wgpu_device;
     wgpu_surface_configuration.format      = wgpu_preferred_fmt;
-    surface.Configure((const wgpu::SurfaceConfiguration *) &wgpu_surface_configuration);
-#endif
+
+    surface.Configure(reinterpret_cast<const wgpu::SurfaceConfiguration *>(&wgpu_surface_configuration));
 
     wgpu_instance = instance.MoveToCHandle();
     wgpu_surface  = surface.MoveToCHandle();
@@ -422,6 +428,49 @@ static bool InitWGPU(GLFWwindow* window)
 
     return true;
 }
+#else
+// Adapter and device initialization via JS
+EM_ASYNC_JS( void, getAdapterAndDeviceViaJS, (),
+{
+    if (!navigator.gpu) throw Error("WebGPU not supported.");
+
+    const adapter = await navigator.gpu.requestAdapter();
+    const device = await adapter.requestDevice();
+    Module.preinitializedWebGPUDevice = device;
+} );
+
+// WebGPU initialization using WGPU (Native and WEB via EMSCRIPTEN)
+static bool InitWGPU(GLFWwindow* window)
+{
+    getAdapterAndDeviceViaJS();
+
+    wgpu::Instance instance = wgpu::CreateInstance(nullptr).MoveToCHandle();
+    wgpu_device   = wgpu::Device(emscripten_webgpu_get_device()).MoveToCHandle();
+    assert(device != nullptr && "Error creating the Device");
+
+    wgpu::SurfaceDescriptorFromCanvasHTMLSelector html_surface_desc;
+    html_surface_desc.selector = "#canvas";
+    wgpu::SurfaceDescriptor surface_desc;
+    surface_desc.nextInChain   = &html_surface_desc;
+
+    wgpu::Surface surface    =  instance.CreateSurface(&surface_desc);
+    wgpu_preferred_fmt = (WGPUTextureFormat) surface.GetPreferredFormat({} /* adapter */);
+
+    wgpu_surface_configuration.presentMode = WGPUPresentMode_Fifo;
+    wgpu_surface_configuration.alphaMode   = WGPUCompositeAlphaMode_Auto;
+    wgpu_surface_configuration.usage       = WGPUTextureUsage_RenderAttachment;
+    wgpu_surface_configuration.width       = wgpu_surface_width;
+    wgpu_surface_configuration.height      = wgpu_surface_height;
+    wgpu_surface_configuration.device      = wgpu_device;
+    wgpu_surface_configuration.format      = wgpu_preferred_fmt;
+
+    wgpu_instance = instance.MoveToCHandle();
+    wgpu_surface  = surface.MoveToCHandle();
+    wgpu_queue    = wgpuDeviceGetQueue(wgpu_device);
+
+    return true;
+}
+#endif
 
 void ResizeSurface(int width, int height)
 {
