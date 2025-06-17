@@ -3,6 +3,15 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
+#if defined(GLFW_EXPOSE_NATIVE_COCOA)
+#include <Foundation/Foundation.h>
+#include <QuartzCore/CAMetalLayer.h>
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 WGPUSurface GLFW_getWGPUSurface(WGPUInstance instance, GLFWwindow* window)
 {
     WGPUSurfaceDescriptor surfaceDescriptor = {};
@@ -20,6 +29,7 @@ WGPUSurface GLFW_getWGPUSurface(WGPUInstance instance, GLFWwindow* window)
         surfaceMetal.layer = metal_layer;
 
         surfaceDescriptor.nextInChain = (const WGPUChainedStruct *) &surfaceMetal;
+        return wgpuInstanceCreateSurface(instance, &surfaceDescriptor);
     }
 #elif defined(GLFW_EXPOSE_NATIVE_WAYLAND) && defined(GLFW_EXPOSE_NATIVE_X11)
     if (glfwGetPlatform() == GLFW_PLATFORM_X11) {
@@ -32,6 +42,7 @@ WGPUSurface GLFW_getWGPUSurface(WGPUInstance instance, GLFWwindow* window)
         surfaceXlib.window  = x11_window;
 
         surfaceDescriptor.nextInChain = (const WGPUChainedStruct *) &surfaceXlib;
+        return wgpuInstanceCreateSurface(instance, &surfaceDescriptor);
     }
 
     if (glfwGetPlatform() == GLFW_PLATFORM_WAYLAND) {
@@ -44,6 +55,7 @@ WGPUSurface GLFW_getWGPUSurface(WGPUInstance instance, GLFWwindow* window)
         surfaceWayland.surface = wayland_surface;
 
         surfaceDescriptor.nextInChain = (const WGPUChainedStruct *) &surfaceWayland;
+        return wgpuInstanceCreateSurface(instance, &surfaceDescriptor);
     }
 #elif defined(GLFW_EXPOSE_NATIVE_WIN32)
     {
@@ -56,11 +68,13 @@ WGPUSurface GLFW_getWGPUSurface(WGPUInstance instance, GLFWwindow* window)
         surfaceHWND.hwnd      = hwnd;
 
         surfaceDescriptor.nextInChain = (const WGPUChainedStruct *) &surfaceHWND;
+        return wgpuInstanceCreateSurface(instance, &surfaceDescriptor);
     }
 #else
 #error "Unsupported GLFW native platform"
 #endif
-    return wgpuInstanceCreateSurface(instance, &surfaceDescriptor);
 }
 
-
+#ifdef __cplusplus
+}
+#endif

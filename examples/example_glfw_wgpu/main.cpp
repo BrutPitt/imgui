@@ -27,13 +27,6 @@
         #include <webgpu/webgpu_glfw.h>
     #else
         #include <webgpu/wgpu.h>
-        #ifdef __cplusplus
-            extern "C" {
-        #endif
-            WGPUSurface GLFW_getWGPUSurface(WGPUInstance instance, GLFWwindow* window);
-        #ifdef __cplusplus
-            }
-        #endif
     #endif
 #endif
 
@@ -121,21 +114,21 @@ int main(int, char**)
 {
     glfwSetErrorCallback(glfw_error_callback);
     if (!glfwInit())
-        return 1;
+        return EXIT_FAILURE;
 
     // Make sure GLFW does not initialize any graphics context.
     // This needs to be done explicitly later.
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     GLFWwindow* window = glfwCreateWindow(wgpu_surface_width, wgpu_surface_height, "Dear ImGui GLFW+WebGPU example", nullptr, nullptr);
     if (window == nullptr)
-        return 1;
+        return EXIT_FAILURE;
 
     // Initialize the WebGPU environment
     if (!InitWGPU(window))
     {
         glfwDestroyWindow(window);
         glfwTerminate();
-        return 1;
+        return EXIT_FAILURE;
     }
 
     glfwShowWindow(window);
@@ -222,7 +215,7 @@ int main(int, char**)
 
         // Check surface texture status
         WGPUTexture texture = check_surface_texture_status(window);
-        if (!texture) continue;
+        if (texture == nullptr) continue;
 
         // Start the Dear ImGui frame
         ImGui_ImplWGPU_NewFrame();
@@ -332,7 +325,7 @@ int main(int, char**)
     glfwDestroyWindow(window);
     glfwTerminate();
 
-    return 0;
+    return EXIT_SUCCESS;
 }
 
 void ResizeSurface(int width, int height)
@@ -398,7 +391,7 @@ static bool InitWGPU(GLFWwindow* window)
 #ifndef NDEBUG
     wgpu::AdapterInfo info;
     localAdapter.GetInfo(&info);
-    printf("Using adapter: \" %s \"\n", info.device.data);
+    printf("Using: \" %s \"\n", info.device.data);
 #endif
 
     // Set device callback functions
@@ -406,23 +399,23 @@ static bool InitWGPU(GLFWwindow* window)
     deviceDesc.SetDeviceLostCallback(wgpu::CallbackMode::AllowSpontaneous, wgpu_device_lost_callback);
     deviceDesc.SetUncapturedErrorCallback(wgpu_error_callback);
 
-    static wgpu::Device acquireddevice;
+    static wgpu::Device acquiredDevice;
 // get device Synchronously
     auto onRequestDevice = [](wgpu::RequestDeviceStatus status, wgpu::Device localDevice, wgpu::StringView message) {
         if (status != wgpu::RequestDeviceStatus::Success) {
             printf("Failed to get an device: %s\n", message.data);
             return;
         }
-        acquireddevice = std::move(localDevice);
+        acquiredDevice = std::move(localDevice);
     };
 
     wgpu::Future waitDeviceFunc { localAdapter.RequestDevice(&deviceDesc, wgpu::CallbackMode::WaitAnyOnly, onRequestDevice) };
     wgpu::WaitStatus waitStatusDevice = instance.WaitAny(waitDeviceFunc, UINT64_MAX);
-    assert(acquireddevice != nullptr && waitStatusDevice == wgpu::WaitStatus::Success && "Error on Device request");
+    assert(acquiredDevice != nullptr && waitStatusDevice == wgpu::WaitStatus::Success && "Error on Device request");
 
-    wgpu_device = acquireddevice.MoveToCHandle();
+    wgpu_device = acquiredDevice.MoveToCHandle();
 
-    // now DAWN has also a member class func to create device: adapter.CreateDevice (only native)
+    // DAWN has also a member class func to create device: adapter.CreateDevice (only native)
     //device = localAdapter.CreateDevice(&deviceDesc);
     //assert(device != nullptr && "Error creating the Device");
 #ifdef __EMSCRIPTEN__
@@ -475,6 +468,15 @@ EM_ASYNC_JS( void, getAdapterAndDeviceViaJS, (),
     Module.preinitializedWebGPUDevice = device;
 } );
 #else
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+    WGPUSurface GLFW_getWGPUSurface(WGPUInstance instance, GLFWwindow* window);
+#ifdef __cplusplus
+}
+#endif
+
 static void handle_request_adapter(WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStringView message, void *userdata1, void *userdata2)
 {
     if (status == WGPURequestAdapterStatus_Success)
@@ -521,9 +523,11 @@ static bool InitWGPU(GLFWwindow* window)
 
     wgpu_device   = emscripten_webgpu_get_device();
     assert(wgpu_device != nullptr && "Error creating the Device");
+
     WGPUSurfaceDescriptorFromCanvasHTMLSelector html_surface_desc = {};
     html_surface_desc.chain.sType = WGPUSType_SurfaceDescriptorFromCanvasHTMLSelector;
     html_surface_desc.selector    = "#canvas";
+
     WGPUSurfaceDescriptor surface_desc = {};
     surface_desc.nextInChain   = &html_surface_desc.chain;
 
@@ -532,7 +536,6 @@ static bool InitWGPU(GLFWwindow* window)
 #else
     wgpuSetLogCallback(log_callback, NULL);
     wgpuSetLogLevel(WGPULogLevel_Warn);
-
 
     WGPURequestAdapterOptions adapterOptions = {};
     adapterOptions.compatibleSurface = wgpu_surface;
@@ -548,7 +551,7 @@ static bool InitWGPU(GLFWwindow* window)
 #ifndef NDEBUG
     WGPUAdapterInfo info = {0};
     wgpuAdapterGetInfo(localAdapter, &info);
-    printf("device: %.*s - driver: %.*s\n", (int) info.device.length, info.device.data, (int) info.description.length, info.description.data);
+    printf("Using: %.*s - %.*s\n", (int) info.device.length, info.device.data, (int) info.description.length, info.description.data);
 #endif
 
     WGPURequestDeviceCallbackInfo deviceCallbackInfo = {};
