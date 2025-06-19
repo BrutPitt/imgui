@@ -15,6 +15,7 @@ extern "C" {
 WGPUSurface GLFW_getWGPUSurface(WGPUInstance instance, GLFWwindow* window)
 {
     WGPUSurfaceDescriptor surfaceDescriptor = {};
+    WGPUChainedStruct     chainedStruct     = {};
 
 #if defined(GLFW_EXPOSE_NATIVE_COCOA)
     {
@@ -24,11 +25,13 @@ WGPUSurface GLFW_getWGPUSurface(WGPUInstance instance, GLFWwindow* window)
         metal_layer = [CAMetalLayer layer];
         [ns_window.contentView setLayer:metal_layer];
 
+        chainedStruct.sType = WGPUSType_SurfaceSourceMetalLayer;
+
         WGPUSurfaceSourceMetalLayer surfaceMetal = {};
-        surfaceMetal.chain   = (const WGPUChainedStruct){ .sType = WGPUSType_SurfaceSourceMetalLayer, };
+        surfaceMetal.chain = chainedStruct;
         surfaceMetal.layer = metal_layer;
 
-        surfaceDescriptor.nextInChain = (const WGPUChainedStruct *) &surfaceMetal;
+        surfaceDescriptor.nextInChain = &surfaceMetal.chain;
         return wgpuInstanceCreateSurface(instance, &surfaceDescriptor);
     }
 #elif defined(GLFW_EXPOSE_NATIVE_WAYLAND) && defined(GLFW_EXPOSE_NATIVE_X11)
@@ -36,12 +39,14 @@ WGPUSurface GLFW_getWGPUSurface(WGPUInstance instance, GLFWwindow* window)
         Display *x11_display = glfwGetX11Display();
         Window x11_window = glfwGetX11Window(window);
 
+        chainedStruct.sType = WGPUSType_SurfaceSourceXlibWindow;
+
         WGPUSurfaceSourceXlibWindow surfaceXlib = {};
-        surfaceXlib.chain   = (const WGPUChainedStruct) { .sType = WGPUSType_SurfaceSourceXlibWindow, };
+        surfaceXlib.chain   = chainedStruct;
         surfaceXlib.display = x11_display;
         surfaceXlib.window  = x11_window;
 
-        surfaceDescriptor.nextInChain = (const WGPUChainedStruct *) &surfaceXlib;
+        surfaceDescriptor.nextInChain = &surfaceXlib.chain;
         return wgpuInstanceCreateSurface(instance, &surfaceDescriptor);
     }
 
@@ -49,12 +54,14 @@ WGPUSurface GLFW_getWGPUSurface(WGPUInstance instance, GLFWwindow* window)
         struct wl_display *wayland_display = glfwGetWaylandDisplay();
         struct wl_surface *wayland_surface = glfwGetWaylandWindow(window);
 
+        chainedStruct.sType = WGPUSType_SurfaceSourceWaylandSurface;
+
         WGPUSurfaceSourceWaylandSurface surfaceWayland = {};
-        surfaceWayland.chain   = (const WGPUChainedStruct) { .sType = WGPUSType_SurfaceSourceWaylandSurface, };
+        surfaceWayland.chain   = chainedStruct;
         surfaceWayland.display = wayland_display;
         surfaceWayland.surface = wayland_surface;
 
-        surfaceDescriptor.nextInChain = (const WGPUChainedStruct *) &surfaceWayland;
+        surfaceDescriptor.nextInChain = &surfaceWayland.chain;
         return wgpuInstanceCreateSurface(instance, &surfaceDescriptor);
     }
 #elif defined(GLFW_EXPOSE_NATIVE_WIN32)
@@ -62,16 +69,18 @@ WGPUSurface GLFW_getWGPUSurface(WGPUInstance instance, GLFWwindow* window)
         HWND hwnd = glfwGetWin32Window(window);
         HINSTANCE hinstance = GetModuleHandle(NULL);
 
+        chainedStruct.sType = WGPUSType_SurfaceSourceWindowsHWND;
+
         WGPUSurfaceSourceWindowsHWND surfaceHWND = {};
-        surfaceHWND.chain     = (const WGPUChainedStruct) { .sType = WGPUSType_SurfaceSourceWindowsHWND, };
+        surfaceHWND.chain     = chainedStruct;
         surfaceHWND.hinstance = hinstance;
         surfaceHWND.hwnd      = hwnd;
 
-        surfaceDescriptor.nextInChain = (const WGPUChainedStruct *) &surfaceHWND;
+        surfaceDescriptor.nextInChain = &surfaceHWND.chain;
         return wgpuInstanceCreateSurface(instance, &surfaceDescriptor);
     }
 #else
-#error "Unsupported GLFW native platform"
+#error "Unsupported GLFW/WebGPU native platform"
 #endif
 }
 

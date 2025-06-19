@@ -10,9 +10,10 @@
 
 
 #include "imgui.h"
-#include "imgui_impl_sdl2.h"
+#include "imgui_impl_sdl3.h"
 #include "imgui_impl_wgpu.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -24,7 +25,8 @@
 #include "../libs/emscripten/emscripten_mainloop_stub.h"
 #endif
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
+
 #include <webgpu/webgpu.h>
 #if defined(IMGUI_IMPL_WEBGPU_BACKEND_DAWN)
     #include <webgpu/webgpu_cpp.h>
@@ -110,18 +112,24 @@ void ResizeSurface(int width, int height)
 // Main code
 int main(int, char**)
 {
-
 #if defined(__linux__)
-    // it's necessary to specify "x11" or "wayland": default is "x11" it works also in wayland
-    SDL_SetHint(SDL_HINT_VIDEODRIVER, "x11");
-        // or comment the previous line and export SDL_VIDEODRIVER environment variable:
-        // export SDL_VIDEODRIVER=wayland             (to set wayland session type)
-        // export SDL_VIDEODRIVER=$XDG_SESSION_TYPE   (to get current session type from WM: x11 | wayland)
+    // SDL3 default is "x11" (it works also in "wayland"), uncomment the line below to use "wayland"
+    // SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "wayland");
 #endif
 
     // Init SDL
-    SDL_Init(SDL_INIT_VIDEO);
-    SDL_Window *window = SDL_CreateWindow("Dear ImGui SDL2+WebGPU example", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, wgpu_surface_width, wgpu_surface_height, SDL_WINDOW_RESIZABLE);
+    if (!SDL_Init(SDL_INIT_VIDEO ))
+    {
+        printf("Error: SDL_Init(): %s\n", SDL_GetError());
+        return EXIT_FAILURE;
+    }
+    SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE;
+    SDL_Window* window = SDL_CreateWindow("Dear ImGui SDL3+WebGPU example", wgpu_surface_width, wgpu_surface_height, window_flags);
+    if (window == nullptr)
+    {
+        printf("Error: SDL_CreateWindow(): %s\n", SDL_GetError());
+        return EXIT_FAILURE;
+    }
 
     // Initialize WGPU
     InitWGPU(window);
@@ -138,7 +146,7 @@ int main(int, char**)
     //ImGui::StyleColorsLight();
 
     // Setup Platform/Renderer backends
-    ImGui_ImplSDL2_InitForOther(window);
+    ImGui_ImplSDL3_InitForOther(window);
 
     ImGui_ImplWGPU_InitInfo init_info;
     init_info.Device = wgpu_device;
@@ -186,10 +194,9 @@ int main(int, char**)
     {
         while (SDL_PollEvent(&event))
         {
-            ImGui_ImplSDL2_ProcessEvent(&event);
-            if (event.type == SDL_QUIT ||
-               (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE &&
-                event.window.windowID == SDL_GetWindowID(window)))
+            ImGui_ImplSDL3_ProcessEvent(&event);
+            if (event.type == SDL_EVENT_QUIT ||
+               (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(window)))
                     canCloseWindow = true;
         }
         // Poll and handle events (inputs, window resize, etc.)
@@ -215,7 +222,7 @@ int main(int, char**)
 
         // Start the Dear ImGui frame
         ImGui_ImplWGPU_NewFrame();
-        ImGui_ImplSDL2_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
 
         // 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear ImGui!).
@@ -308,7 +315,7 @@ int main(int, char**)
 
     // Cleanup
     ImGui_ImplWGPU_Shutdown();
-    ImGui_ImplSDL2_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
 
     wgpuSurfaceUnconfigure(wgpu_surface);
