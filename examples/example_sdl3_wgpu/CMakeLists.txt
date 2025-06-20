@@ -17,9 +17,17 @@
 #   * build/example_sdl3_wgpu[.exe]
 
 # Building for Emscripten:
+# At current date (jun/2025) there is no official support for SDL3 in EMSCRIPTEN,
+# and its use in EMSCRIPTEN is also in the experimental phase.
+# To use SDL3 with EMSCRIPTEN you need to download the SDL3 repository (source code)
+# and build the libraries for EMSCRIPTEN following the official page:
+# https://wiki.libsdl.org/SDL3/README-emscripten#building-sdlemscripten
+#
+# the SDL3 library will be built in `your_SDL3_folder/build`
+#
 #  1. Install Emscripten SDK following the instructions: https://emscripten.org/docs/getting_started/downloads.html
 #  2. Install Ninja build system
-#  3. emcmake cmake -G Ninja -B build
+#  3. emcmake cmake -DIMGUI_SDL3_EMSCRIPTEN_DIR=your_SDL3_folder -G Ninja -B build
 #  3. cmake --build build
 #  4. emrun build/index.html
 
@@ -57,7 +65,7 @@ set(IMGUI_EXAMPLE_SOURCE_FILES
 if(EMSCRIPTEN)
 
   if(EMSCRIPTEN_VERSION VERSION_GREATER_EQUAL "4.0.10")
-    set(IMGUI_EMSCRIPTEN_WEBGPU_FLAG "-sUSE_WEBGPU=1" CACHE STRING "Choose between --use-port=emdawnwebgpu (Dawn implementation of EMSCRIPTEN) and -sUSE_WEBGPU=1 (WGPU implementation of EMSCRIPTEN, deprecated in 4.0.10): default to --use-port=emdawnwebgpu for EMSCRIPTEN >= 4.0.10")
+    set(IMGUI_EMSCRIPTEN_WEBGPU_FLAG "--use-port=emdawnwebgpu" CACHE STRING "Choose between --use-port=emdawnwebgpu (Dawn implementation of EMSCRIPTEN) and -sUSE_WEBGPU=1 (WGPU implementation of EMSCRIPTEN, deprecated in 4.0.10): default to --use-port=emdawnwebgpu for EMSCRIPTEN >= 4.0.10")
   else()
     set(IMGUI_EMSCRIPTEN_WEBGPU_FLAG "-sUSE_WEBGPU=1" CACHE STRING "Use -sUSE_WEBGPU=1 for EMSCRIPTEN WGPU implementation" FORCE)
   endif()
@@ -157,11 +165,11 @@ target_include_directories(${IMGUI_EXECUTABLE} PUBLIC
 
 )
 
-target_link_libraries(${IMGUI_EXECUTABLE} PUBLIC ${LIBRARIES} SDL3::SDL3)
-
 target_compile_definitions(${IMGUI_EXECUTABLE} PUBLIC "IMGUI_EXAMPLE_SDL3_WGPU")
 
 IF(NOT EMSCRIPTEN)
+  target_link_libraries(${IMGUI_EXECUTABLE} PUBLIC ${LIBRARIES} SDL3::SDL3)
+
   if(IMGUI_DAWN_DIR)
     target_compile_definitions(${IMGUI_EXECUTABLE} PUBLIC "IMGUI_IMPL_WEBGPU_BACKEND_DAWN")
   else()
@@ -169,6 +177,16 @@ IF(NOT EMSCRIPTEN)
     target_include_directories(${IMGUI_EXECUTABLE} PUBLIC ${IMGUI_WGPU_DIR}/include)
   endif()
 else()
+  set(CMAKE_EXECUTABLE_SUFFIX ".html")
+
+  if(NOT IMGUI_SDL3_EMSCRIPTEN_DIR)
+    message(FATAL_ERROR "aaaaa")
+  else()
+    target_include_directories(${IMGUI_EXECUTABLE} PUBLIC ${IMGUI_SDL3_EMSCRIPTEN_DIR}/include)
+    find_library(SDL_EMS_LIBRARY NAMES libSDL3.a libSDL3.lib libSDL3 SDL3.a SDL3.lib SDL3
+                 PATHS ${IMGUI_SDL3_EMSCRIPTEN_DIR}/build REQUIRED NO_CMAKE_FIND_ROOT_PATH)
+    target_link_libraries(${IMGUI_EXECUTABLE} PUBLIC ${SDL_EMS_LIBRARY})
+  endif()
 
   if("${IMGUI_EMSCRIPTEN_WEBGPU_FLAG}" STREQUAL "--use-port=emdawnwebgpu")
     target_compile_options(${IMGUI_EXECUTABLE} PUBLIC "${IMGUI_EMSCRIPTEN_WEBGPU_FLAG}")
@@ -178,17 +196,18 @@ else()
   endif()
   message(STATUS "Using ${IMGUI_EMSCRIPTEN_WEBGPU_FLAG} WebGPU implementation")
 
+
   target_compile_options(${IMGUI_EXECUTABLE} PUBLIC "-sUSE_SDL=2" )
   target_link_options(${IMGUI_EXECUTABLE} PRIVATE
     "${IMGUI_EMSCRIPTEN_WEBGPU_FLAG}"
-    "-sUSE_SDL=3"
+    #"-sUSE_SDL=3"  # There is currently no official support internally at emscripten
     "-sWASM=1"
     "-sASYNCIFY=1"
     "-sALLOW_MEMORY_GROWTH=1"
     "-sNO_EXIT_RUNTIME=0"
     "-sASSERTIONS=1"
     "-sDISABLE_EXCEPTION_CATCHING=1"
-    "-sNO_FILESYSTEM=1"
+    #"-sNO_FILESYSTEM=1"  # sdl3 integrates a filesystem, you need to disable it at SDL3 build time
     "--shell-file=${CMAKE_CURRENT_LIST_DIR}/../libs/emscripten/shell_minimal.html"
   )
   set_target_properties(${IMGUI_EXECUTABLE} PROPERTIES OUTPUT_NAME "index")
