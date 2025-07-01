@@ -23,8 +23,13 @@ The resulting binary will be found at one of the following locations:
  1. Install Emscripten SDK following the instructions: https://emscripten.org/docs/getting_started/downloads.html
  2. Install Ninja build system
  3. `emcmake cmake -G Ninja -B build`
- 3. `cmake --build build`
- 4. `emrun build/index.html` 
+ 4. `cmake --build build`
+ 
+To run:
+ - `emrun build/index.html`
+
+or
+ - `python -m http.server`  then open WGPU browser with url: `http://localhost:8000/build`
 
 
 ### Using makefile 

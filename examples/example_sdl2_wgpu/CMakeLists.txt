@@ -27,7 +27,6 @@ cmake_minimum_required(VERSION 3.10.2)
 project(imgui_example_sdl2_wgpu C CXX)
 
 set(IMGUI_EXECUTABLE example_sdl2_wgpu)
-set(IMGUI_LIBS_WEBGPU_DIR ../libs/webgpu)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug CACHE STRING "" FORCE)
@@ -51,6 +50,7 @@ set(IMGUI_EXAMPLE_SOURCE_FILES
     ${IMGUI_DIR}/imgui_tables.cpp
     ${IMGUI_DIR}/imgui_widgets.cpp)
 
+# SDL_MAIN_HANDLED
     find_package(SDL2 REQUIRED)
 
 # Libraries
@@ -74,9 +74,8 @@ else()
   endif()
 
   # Add SDL2 module to get Surface, with libs and file property for MacOS build
-  set(IMGUI_EXAMPLE_SOURCE_FILES ${IMGUI_EXAMPLE_SOURCE_FILES} ${IMGUI_LIBS_WEBGPU_DIR}/sdl2_wgpu.c)
   if(APPLE)
-    set_source_files_properties(${IMGUI_LIBS_WEBGPU_DIR}/sdl2_wgpu.c PROPERTIES COMPILE_FLAGS "-x objective-c")
+    set_source_files_properties(${IMGUI_DIR}/backends/imgui_impl_sdl2.cpp PROPERTIES COMPILE_FLAGS "-x objective-c++")
     set(OS_LIBRARIES "-framework CoreFoundation -framework QuartzCore -framework Metal -framework MetalKit -framework Cocoa")
   endif()
 
@@ -138,13 +137,6 @@ else()
   endif()
 endif()
 
-# adding webgpu initialization files
-if(IMGUI_DAWN_DIR OR ("${IMGUI_EMSCRIPTEN_WEBGPU_FLAG}" MATCHES "emdawnwebgpu"))
-    set(IMGUI_EXAMPLE_SOURCE_FILES ${IMGUI_EXAMPLE_SOURCE_FILES} ${IMGUI_LIBS_WEBGPU_DIR}/imgui_init_dawn.cpp)
-else()
-    set(IMGUI_EXAMPLE_SOURCE_FILES ${IMGUI_EXAMPLE_SOURCE_FILES} ${IMGUI_LIBS_WEBGPU_DIR}/imgui_init_wgpu.cpp)
-endif()
-
 add_executable(${IMGUI_EXECUTABLE} ${IMGUI_EXAMPLE_SOURCE_FILES})
 
 target_include_directories(${IMGUI_EXECUTABLE} PUBLIC
@@ -157,6 +149,15 @@ target_link_libraries(${IMGUI_EXECUTABLE} PUBLIC ${LIBRARIES} ${SDL2_LIBRARIES})
 
 target_compile_definitions(${IMGUI_EXECUTABLE} PUBLIC "IMGUI_EXAMPLE_SDL2_WGPU")
 
+# IMGUI_IMPL_WEBGPU_BACKEND_DAWN/WGPU internal define is set according to:
+#   EMSCRIPTEN: by used FLAG
+#     --use-port=emdawnwebgpu --> IMGUI_IMPL_WEBGPU_BACKEND_DAWN enabled (+EMSCRIPTEN)
+#     -sUSE_WEBGPU=1          --> IMGUI_IMPL_WEBGPU_BACKEND_WGPU enabled (+EMSCRIPTEN)
+#   NATIVE: by used SDK installation directory
+#     if IMGUI_DAWN_DIR is valid --> IMGUI_IMPL_WEBGPU_BACKEND_DAWN enabled
+#     if IMGUI_WGPU_DIR is valid --> IMGUI_IMPL_WEBGPU_BACKEND_WGPU enabled
+
+# Native settings
 IF(NOT EMSCRIPTEN)
   if(IMGUI_DAWN_DIR)
     target_compile_definitions(${IMGUI_EXECUTABLE} PUBLIC "IMGUI_IMPL_WEBGPU_BACKEND_DAWN")
@@ -164,6 +165,7 @@ IF(NOT EMSCRIPTEN)
     target_compile_definitions(${IMGUI_EXECUTABLE} PUBLIC "IMGUI_IMPL_WEBGPU_BACKEND_WGPU")
     target_include_directories(${IMGUI_EXECUTABLE} PUBLIC ${IMGUI_WGPU_DIR}/include)
   endif()
+# Emscripten settings
 else()
   set(CMAKE_EXECUTABLE_SUFFIX ".html")
 
