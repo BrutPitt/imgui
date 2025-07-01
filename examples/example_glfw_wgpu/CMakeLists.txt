@@ -36,8 +36,6 @@ set(CMAKE_CXX_STANDARD 17) # Dawn requires C++17
 
 # Dear ImGui
 set(IMGUI_DIR ../../)
-set(IMGUI_LIBS_WEBGPU_DIR ../libs/webgpu)
-
 
 # ImGui example commons source files
 set(IMGUI_EXAMPLE_SOURCE_FILES
@@ -126,7 +124,6 @@ else()
     set(WGPU_NATIVE_LIB_DIR ${IMGUI_WGPU_DIR}/lib)
     find_library(WGPU_LIBRARY NAMES libwgpu_native.a wgpu_native.lib wgpu_native
                  HINTS ${WGPU_NATIVE_LIB_DIR} REQUIRED)
-    set(IMGUI_EXAMPLE_SOURCE_FILES ${IMGUI_EXAMPLE_SOURCE_FILES} ${IMGUI_LIBS_WEBGPU_DIR}/glfw_wgpu.c)
     if (WIN32)
       add_definitions(-DGLFW_EXPOSE_NATIVE_WIN32)
       set(OS_LIBRARIES d3dcompiler ws2_32 userenv bcrypt ntdll opengl32 Propsys RuntimeObject)
@@ -136,19 +133,12 @@ else()
       set(OS_LIBRARIES "-lm -ldl")
     elseif(APPLE)
       add_definitions(-DGLFW_EXPOSE_NATIVE_COCOA)
-      set_source_files_properties(${IMGUI_LIBS_WEBGPU_DIR}/glfw_wgpu.c PROPERTIES COMPILE_FLAGS "-x objective-c")
+      set_source_files_properties(${IMGUI_DIR}/backends/imgui_impl_glfw.cpp PROPERTIES COMPILE_FLAGS "-x objective-c++")
       set(OS_LIBRARIES "-framework CoreFoundation -framework QuartzCore -framework Metal -framework MetalKit -framework Cocoa")
     endif()
 
     set(LIBRARIES glfw ${WGPU_LIBRARY} ${OS_LIBRARIES})
   endif()
-endif()
-
-# adding webgpu initialization files
-if(IMGUI_DAWN_DIR OR ("${IMGUI_EMSCRIPTEN_WEBGPU_FLAG}" MATCHES "emdawnwebgpu"))
-    set(IMGUI_EXAMPLE_SOURCE_FILES ${IMGUI_EXAMPLE_SOURCE_FILES} ${IMGUI_LIBS_WEBGPU_DIR}/imgui_init_dawn.cpp)
-else()
-    set(IMGUI_EXAMPLE_SOURCE_FILES ${IMGUI_EXAMPLE_SOURCE_FILES} ${IMGUI_LIBS_WEBGPU_DIR}/imgui_init_wgpu.cpp)
 endif()
 
 add_executable(${IMGUI_EXECUTABLE} ${IMGUI_EXAMPLE_SOURCE_FILES})
@@ -160,13 +150,13 @@ target_include_directories(${IMGUI_EXECUTABLE} PUBLIC
 
 target_compile_definitions(${IMGUI_EXECUTABLE} PUBLIC "IMGUI_EXAMPLE_GLFW_WGPU")
 
-# IMGUI_IMPL_WEBGPU_BACKEND_DAWN/WGPU internal define is set according to:
+# In this example IMGUI_IMPL_WEBGPU_BACKEND_DAWN / IMGUI_IMPL_WEBGPU_BACKEND_WGPU internal define is set according to:
 #   EMSCRIPTEN: by used FLAG
-#     --use-port=emdawnwebgpu --> IMGUI_IMPL_WEBGPU_BACKEND_DAWN enabled
-#     -sUSE_WEBGPU=1          --> IMGUI_IMPL_WEBGPU_BACKEND_WGPU enabled
+#     --use-port=emdawnwebgpu --> IMGUI_IMPL_WEBGPU_BACKEND_DAWN defined
+#     -sUSE_WEBGPU=1          --> IMGUI_IMPL_WEBGPU_BACKEND_WGPU defined
 #   NATIVE: by used SDK installation directory
-#     if IMGUI_DAWN_DIR is valid --> IMGUI_IMPL_WEBGPU_BACKEND_DAWN enabled
-#     if IMGUI_WGPU_DIR is valid --> IMGUI_IMPL_WEBGPU_BACKEND_WGPU enabled
+#     if IMGUI_DAWN_DIR is valid --> IMGUI_IMPL_WEBGPU_BACKEND_DAWN defined
+#     if IMGUI_WGPU_DIR is valid --> IMGUI_IMPL_WEBGPU_BACKEND_WGPU defined
 
 # Native settings
 if(NOT EMSCRIPTEN)
