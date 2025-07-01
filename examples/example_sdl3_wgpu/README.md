@@ -20,7 +20,7 @@ The resulting binary will be found at one of the following locations:
   * build/example_sdl2_wgpu[.exe]
 
 #### Building for Emscripten:
-At current date (jun/2025) there is no official support for SDL3 in EMSCRIPTEN, and its use in EMSCRIPTEN is also in the experimental phase.
+At current date (Jul/2025) there is no official support for SDL3 in EMSCRIPTEN, and its use in EMSCRIPTEN is also in the experimental phase.
 To use SDL3 with EMSCRIPTEN you need to download the SDL3 repository (source code) and build the libraries for EMSCRIPTEN following the official page: 
 https://wiki.libsdl.org/SDL3/README-emscripten#building-sdlemscripten
 
